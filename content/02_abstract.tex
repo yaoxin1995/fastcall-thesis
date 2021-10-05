@@ -8,10 +8,39 @@
 % geben (für irgendetwas müssen die Betreuer ja auch noch da
 % sein).
 
-\ldots abstract \ldots
+%\ldots abstract \ldots
 
-\todo{write abstract}
+%\todo{write abstract}
 
+With the popularity of intelligent hardware like Smart NIC 
+and NVMe based SSD, the transmission speed of hardware is getting faster and faster. 
+This has led to that current I/O models are not suitable for data transmission due 
+to Kennel's complex structure. When the application tries to communicate with 
+the device through system calls, the kernel IO path's overhead becomes more and 
+more severe in the context of NVMe-based SSD or RDMA network card. Thus, OS bypass 
+technologies like DPDK and SPDK are coming to use to gain better performance 
+and higher throughput. However, Those technologies are not flexible enough 
+as they require dedicated hardware support, which is expensive and hard to adapt.
+
+Clever developers may consider bypassing the kernel by directly 
+mapping the device into userspace to work around the burden of 
+specialized hardware. However, this has led to significant potential 
+security issues because \textquote{ there is no centralized and trusted 
+entity to control the operations issued by applications to hardware, 
+and most devices themselves lack sufficient isolation mechanism}
+
+We explore using a new system call mechanism to reduce the overhead
+ caused by kernel and restriction of specialized hardware by mapping 
+ system call functions and corresponding device control registers to 
+ userspace. The evaluation shows this approach could significantly 
+ increase the performance compared to the traditional IO path crossing 
+ the user kernel boundary. However, we must avoid losing safety protection 
+ for devices or mitigate secure vulnerability caused by bypassing the kernel
+  entirely. We will try to sketch Potential solutions to these problems, 
+  inspired by multiple classic attack models such as meltdown. 
+  In summary, with this new idea, performance-critical applications 
+  may have the ability to interact with PCIe devices in low latency,
+   software-based, less secured way.
 %%% Local Variables:
 %%% TeX-master: "diplom"
 %%% End:

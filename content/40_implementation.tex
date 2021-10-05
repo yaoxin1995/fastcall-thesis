@@ -20,12 +20,606 @@
 % nichts zu suchen, auch nicht im Anhang, sondern gehören auf Rechner,
 % auf denen man sie sich ansehen kann.
 
-\ldots implementation \ldots
+%\ldots implementation \ldots
 
-\todo{write implementation}
+This chapter will introduce the implementation of fast call infrastructure in the kernel and what efforts the fast call mechanism has 
+made in the face of attackers who try to exploit fast calls to control devices.
+
+\section{Fast Call Mechanism Overview}
+
+Before explaining the implementation of the fast call mechanism in-depth, we introduce the workflow of the fast call from multiple perspectives 
+to help everyone understand the fast call mechanism more comprehensively. However, do not worry if you do not understand this section. 
+Please continue reading. The primary purpose of this section is to give you a general understanding of fast calls. 
+We will explain all the implementation details in the following sections.
+
+\subsection{Fast call registration process}
+
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=0.8\textwidth]{images/registeration_process}
+  \caption[Short description]{Fast Call Registration Process}
+  \label{fig:registeration_process}
+\end{figure}
+
+Figure ~\ref{fig:registeration_process} shows the whole process of fast call registration:
+\begin{enumerate}
+  \item The process informs the device driver to register a fast call through the IOCTL system call.
+  \item In the device driver:
+    \begin{itemize}
+      \item Copy the code for fast call entry and secret regions to page A and B.
+        \begin{description}
+          \item[Note:] The fast call mechanism supports creating a fast call entry region with a code length greater than 1 page. In this case, the code for the fast call entry region is copied to page array A.
+        \end{description}
+      \item Call the fast call registration function provided by the fast call infrastructure and passes pages 1 and 2 as parameters.
+    \end{itemize}
+  \item In the kernel-provided fast call infrastructure:
+    \begin{itemize}
+      \item Create an entry and secret regions in the process address space for the fast call and map pages 1 and 2 to entry and secret regions, respectively.
+      \item Create fast call hidden regions for each device register set and map register sets to hidden regions.
+      \item Write the address of the fast call hidden regions into the page of the fast call secret region.
+      \item Save the fast call information in the fast call table.
+      \item Return the address of the fast call entry region
+    \end{itemize}
+  \item The driver returns the address of the fast call entry region to the process.
+  \item The process calls the fast call through a function pointer with the address of the fast call entry region.
+\end{enumerate}
+
+
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=0.8\textwidth]{images/fastcall_workflow}
+  \caption[Short description]{Fast Call Work Flow}
+  \label{fig:fastcall_workflow}
+\end{figure}
+\subsection{Fast call work flow}
+Figure ~\ref{fig:fastcall_workflow} shows the fast call workflow on user space of a process:
+\begin{enumerate}
+  \item In the process:
+    \begin{itemize}
+      \item Define a function pointer to the fast call entry region.
+      \item Exploit the defined function pointer to invoke the fast call.
+    \end{itemize}
+  \item The code on the fast call entry region uses a relative jump instruction \verb|jmp offset| to jump to the fast call secret region.
+  \item In the fast call secret region:  
+    \begin{itemize}
+      \item Execute the instruction \verb|mov secret, register| to transfer the secret to a general-purpose register,  e.g., \verb|movq $0x19016BC83000, %rdx|.
+        \begin{description}
+          \item[Note:] The secret refers to the address of the fast call hidden region in the process address space.
+        \end{description}
+      \item Use fast call relative jump instructions to return to the fast call entry region.
+    \end{itemize}
+  \item The fast call entry region continues to execute the code and access the fast call hidden region through the secret on the register.
+  \begin{description}
+    \item[Note:] The secret must always be in the register when the fast call is running. 
+    Once the secret is taken out of the register and placed on the stack, 
+    the secret  may be leaked since GDB can view stack information.
+  \end{description}
+  \item The fast call entry region clears the secrets in the registers and returns the fast call execution result to the process.
+\end{enumerate}
+
+\section{Fast call table}
+From the previous discussion, it is not difficult to see that two fast calls may run in different user spaces, and user spaces are isolated from each other. In this case, how should the fast call mechanism manage all fast calls? 
+
+Fast call infrastructure chooses to use a table to manage registered fast calls. This table records the addresses of the fast call entry, secret and hidden regions in each fast call. The Fast call infrastructure keeps track of all fast calls through this table. 
+The following few sections will introduce the fast call table's internal structure and working principle. 
+
+\subsection{Placement of fast call table}
+Suppose the fast call mechanism place a fast call table in each process address space to record the fast calls registered by each process. This is insecure and inefficient. Because the table is in the user space, although we can randomize the address of the table, malicious users can still find the table by traversing the entire user space. Once the attacker finds the table,  he can gain control of a device by accessing the device register mapped in a hidden region.
+On the other hand, one of the design goals of the fast call mechanism is to avoid mode conversion as much as possible. Suppose the fast call table is placed in the user address space. In that case, the fast call infrastructure must perform an additional user-kernel mode switch to write the fast call information into the corresponding table during the fast call registration process. Therefore, placing a table to record the fast calls that a process has registered in each process is unwise.
+
+The opposite of user space is the kernel address space. One of the characteristics of the kernel address space is that all processes share the kernel address space. Therefore, it is possible to use a table in the kernel to record fast calls from different address spaces.
+In addition, placing the fast call table in the kernel space has the following advantages:
+\begin{enumerate}
+  \item The fast call mechanism only needs one table to record all fast calls, which means efficient space utilization.
+  \item The fast call registration process can eliminate the performance loss caused by additional mode switching.
+  \item The security of the fast call table is improved since it is protected by the kernel.
+\end{enumerate}
+
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=0.8\textwidth]{images/fastcall_table}
+  \caption[Short description]{Fast Call Table}
+  \label{fig:fastcall_table}
+\end{figure}
+
+\subsection{The structure of the fast call table}
+As shown in Figure ~\ref{fig:fastcall_table},the fast call table mainly comprises two parts, 
+the entries, and the table attributes. 
+Each entry is used to record a fast call's information, 
+such as each component's address in a fast call and the number of 
+hidden areas supported by the fast call and fast call records represent the registered fast calls. Table attributes mainly 
+contain two variables. The first variable \verb|entries_size| 
+records the number of fast calls in the table. Another variable is a 
+\verb|mutex| that prevents two processes from accessing the table at the same time.
+
+\subsection{Allocation and deallocation}
+The memory resources in the kernel are very scarce. 
+Therefore, the fast calling mechanism chooses to allocate memory dynamically for fast calling tables. Whenever a process registers for a fast call, the fast call mechanism 
+first checks whether the table has been allocated　and initialized. If not, the fast call mechanism will first allocate memory for the table and then complete the fast call registration process.
+Similarly, the fast call mechanism checks the number of fast call records in the table during the fast call deregistration process. If the number of fast call records in the table is 0, the table's memory will be released.
+All in all, by dynamically allocating and releasing the table's memory when registering and unregistering a fast call, the fast call mechanism realizes the efficient use of kernel memory and avoids possible memory leaks. 
+
+\subsection{Distinguish fast calls}
+The fast call table uses the address of the fast call entry region to distinguish 
+fast calls from each other because the address of the fast call entry in each fast calls is unique.
+When the fast call mechanism creates a fast call, it will randomize the fast call entry 
+region's address. As a result, fast calls in the same and different user spaces will
+have a unique fast call entry region address. In other words, 
+each fast call has a unique fast call entry region address. Thus, the fast call mechanism 
+can use this address as a key to traverse the fast call table to find the corresponding 
+fast call record.
+
+
+
+\subsection{Fast call entry}
+
+Speaking of the entrance, as shown in the figure, it contains information about 
+a fast call.  Remember that we mentioned in the design chapter that 
+a fast call includes:
+\begin{itemize}
+  \item The entry region.
+  \item The secret region.
+  \item The hidden region.
+\end{itemize}
+Because a device may have multiple control registers, 
+the fast call mechanism supports the creation of numerous 
+hidden regions for a fast call to map the device control registers to different locations in 
+the user address space. Based on the above considerations, each entry in 
+the table includes the addresses of 
+the entry region, the secret region, and multiple hidden regions. 
+In an entry, the number ratio of the entry region to the secret region 
+to the hidden region is 1:1: n.
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=0.8\textwidth]{images/Fast_Call_entries}
+  \caption[Short description]{Fast Call Entry}
+  \label{fig:Fast_Call_entries}
+\end{figure}
+Generally speaking, a fast call record is created when the 
+fast call is registered and deleted when the fast call deregistration 
+function provided by the fast call mechanism is called.
+
+What if a process registered with fast calls does 
+not call the deregistration function and terminates directly? 
+Specifically, suppose that a process suddenly terminates after 
+registering multiple fast calls. The unregister function is not 
+called to delete the corresponding records in the fast call table. 
+In this case, multiple zombie entries will appear in the table. 
+Therefore, the table's memory can no longer be dynamically released, 
+which means a memory leak occurs in the table.
+
+The fast call mechanism solves this problem with the help 
+of the data structure called \verb|mm_struct|.  The data structure \verb|mm_struct|
+represents the process address space descriptor in the kernel, which contains a list of virtual memory area.
+ Most resources, including the process address space descriptor, 
+ are tracked through a reference counter in the Linux kernel.  
+ When the reference counter is reduced to zero, the kernel invokes the 
+ deconstructor to recycle the resource since no one uses the resource anymore.  
+ Specifically, a process address space descriptor is released when all threads 
+ running on the address space are terminated. 
+
+The fast call mechanism exploits the resource management mechanism 
+in the kernel to delete zombie records in the fast call table. 
+In the address space descriptor's deconstructor, the fast call mechanism 
+checks whether the address space contains virtual memory areas belonging 
+to fast calls. If there is, it removes the corresponding fast 
+call records in the fast call table.
+
+\section{Fast call mapping}
+This section will focus on mapping the three components of 
+a fast call in the process address space. We will introduce 
+how to prevent others from manipulating the mapping 
+belonging to fast calls and 
+other issues related to the fast call mapping in the process address space.
+\subsection{Prohibiting others from operating the mapping of a fast call}
+Remember that we introduced in Chapter Design 
+that a fast call is roughly composed of three parts: 
+entry, secret, and hidden regions. From the kernel's perspective, 
+these three fast call components are just three virtual memory 
+areas(VMA)represented by \verb|vm_area_struct| in a process address space and 
+tracked by a list in process address space descriptor.
+
+Therefore, the kernel (or user-level process) can modify these three 
+virtual memory areas through specific functions (or system calls). 
+For example, change the location (address) of the virtual memory 
+areas in the process address space, unmap the virtual memory areas 
+or swap pages to disk in a virtual memory area. The consequences 
+are unimaginable if a process or the kernel can manipulate the memory 
+mapping related to a fast call. Suppose the kernel can unmap a fast 
+call's secret region without authorization of the fast call mechanism. 
+In this case, the fast call entry region code cannot communicate with the device through 
+memory-mapped device registers anymore.  More seriously, this will cause the 
+fast call infrastructure to crash during the fast call deregistration 
+process because it cannot unmap the secret region.
+
+As Kernel design and implementation explained:\textquote{
+The field VMA operations in the virtual memory area descriptor points 
+to the table of operations associated with a given virtual 
+memory area, which the kernel can invoke to manipulate the VMA. 
+The virtual memory area descriptor acts as a generic object for any type of memory area, 
+and the operations table describes the specific methods that can operate 
+on this particular instance of the object.} Specifically, 
+when the kernel wants to change the address of a VMA or unmap it, 
+the kernel will call the method in the table to complete those 
+operations. Therefore, when a process registers a fast call through 
+the API provided by the fast call mechanism, the fast call mechanism 
+will customize the following three specific methods in the operation
+table associated with the \verb|VMAs| that belonged to this fast call to avoid 
+those \verb|VMAs| from un/remap, etc.
+
+\begin{lstlisting}[style=CStyle]
+  /*
+   * fastcall_mremap - prohibit remap the fast call entry region, secret region, and hidden regions
+   */
+ static int fastcall_mremap(const struct vm_special_mapping *sm, struct vm_area_struct *new_vma)
+ {
+   /* Invalid argument */
+   return -EINVAL;
+ }
+
+ /*
+  * fastcall_may_unmap - prohibit unmap the fast call entry region, secret region, and hidden regions
+  */
+static int fastcall_may_unmap(const struct vm_special_mapping *sm,
+			      struct vm_area_struct *vma)
+{
+	/* Permission denied */
+	return -EACCES;
+}
+
+/*
+ * fast call_fault - every fault to this vma is invalid
+ */
+static vm_fault_t fastcall_fault(const struct vm_special_mapping *sm,
+				 struct vm_area_struct *vma,
+				 struct vm_fault *vmf)
+{
+
+	return VM_FAULT_SIGBUS;
+}
+\end{lstlisting}
+
+First, The function \verb|fastcall_mremap| prohibits the kernel 
+(or user-level process) from modifying the address of any virtual 
+memory area related to fast calls. Once the \verb|VMAs| are mapped to a 
+process address space by the fast call mechanism, those \verb|VMAs|  cannot 
+be changed unless the process deregisters the fast call. The function 
+\verb|fastcall_may_unmap| is similar to \verb|fastcall_mremap|. This function 
+prevents others from unmapping \verb|VMAs| belonging to fast 
+calls without the permission of the fast call mechanism. Typically, The \verb|VMAs|  belonging to a 
+fast call will not generate a page fault since the pages mapped in the 
+fast call's VMA are kept in memory. Just in case, we set up the page fault 
+handling function to return an error. Do not worry. We will explain in 
+the following paragraphs why pages mapped to \verb|VMAs| belonging to fast calls 
+are not swapped out.
+
+\subsection{VMA flags of fast call components}
+As mentioned in Chapter 3, in a fast call, the entry region,
+the secret region, and the hidden region should be readable and executable, 
+only executable, and readable and writable, respectively. How to achieve this design decision?
+
+The solution is straightforward. When the fast call mechanism initializes 
+\verb|VMAs| for the components in a fast call, it will add flowing flags for 
+each \verb|VMA|. These flags determine the access rights of a \verb|VMAs|.
+
+\begin{lstlisting}[style=CStyle]
+  /* Flags for entry region */
+  VM_READ| VM_MAYREAD|VM_EXEC |VM_MAYEXEC
+
+  /* Flags for secret region */
+  VM_EXEC | VM_MAYEXEC
+
+  /* Flags for hidden region */
+  VM_READ | VM_MAYREAD | VM_MAYWRITE | VM_WRITEVMA
+\end{lstlisting}
+
+
+In addition, to ensure that all pages mapped to fast calls' \verb|VMAs| 
+are not swapped out, the fast call mechanism also adds the flag \verb|VM_LOCKED|  
+to each \verb|VMA|. The advantage of this is to improve the performance of 
+fast calls because the page fault is very time-consuming.
+
+Finally, the flag \verb|VM_DONTCOPY| is added to all the fast calls' \verb|VMAs| to prevent 
+them from copying from their process address space to a new process address space 
+under the fork system call. The reason is that the fast call table requires that each 
+fast call has a unique entry region address to distinguish the fast call records in 
+the table. For example, the fast call deregistration function uses the fast call entry 
+region's address as the key to looking for the corresponding record in the table and then 
+unmaps the fast call from the corresponding address space and deletes the entry in the table. 
+Assume that processes A and B have the fast call with the same entry region address in their 
+address space, respectively. When A unregisters the fast call in its address space, 
+the fast call deregistration function deletes the corresponding record in the table 
+before returning. This has led to B's inability to unregister its fast call because 
+the fast call deregistration function cannot find the corresponding record in the table.
+
+
+\section{Fast call entry/hidden region randomization}
+
+
+Randomizing the start address of the fast call entry and hidden region is essential.
+The first reason comes from security considerations. When the kernel allocates a 
+VMA in a process address space, it will look up from the lower address of the address 
+space to a position suitable for the size of the VMA. Therefore, two \verb|VMAs| 
+allocated one after the other may be in adjacent positions. Assume a fast 
+call has an entry, secret, and hidden region. When the fast call mechanism 
+creates the fast call, it will allocate three virtual memory areas in the current 
+process's address space. Suppose the address of the entry and hidden regions are 
+not randomized. According to the default behavior of the kernel, three areas will 
+likely be placed in the address space adjacently. In other words, the entry, secret,
+and hidden regions are adjacent to each other in the address space. Since the address 
+of the fast call entry region is returned to the user as the fast call's entry, 
+a malicious user can easily infer the location of the hidden region based on this value returned.
+The second reason is that the fast call table requires the address of the 
+fast call entry region in each fast call to be unique. The fast call table 
+leverage the fast call entry region address in each fast call to distinguish
+different fast calls.
+
+\subsection{Randomization method}
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=0.8\textwidth]{images/mmap_search_methods}
+  \caption[Short description]{Mmap() workflow}
+  \label{fig:mmap_search_methods}
+\end{figure}
+
+First, let us study the process of creating a VMA by the kernel. 
+The kernel creates a VMA mainly in two steps. In the first step, as shown in Figure ~\ref{fig:mmap_search_methods}, the kernel calls 
+a function searching an area suitable for the size of the VMA  in the corresponding 
+address space and returns the starting address A of the area. In the second step, 
+The kernel will create a VMA and add it to address A in the address space.  
+Note that in the first step of creating a VMA, the search 
+function always starts searching from address low limit.
+
+Based on the above workflow, the fast call mechanism leverage the randomization 
+of address "low limit" to randomize the fast calls' VMA location. Precisely,  
+when the fast call mechanism allocates \verb|VMAs| in the process address space for 
+the entry and hidden regions, it will generate a 64-bit random number and 
+reserve the lower 46  bits of the number serve as the starting address for 
+the kernel to search for a suitable area for this VMA. In this way, the search 
+function starts from a different location each time. Therefore,  the location 
+that the kernel found for the VMA is randomized too. 
+
+\section{Secret region and secret}
+
+This section will focus on the fast call's secret region and 
+secrets on it. We will introduce how the secret is placed on the secret region, how the code on 
+the entry region retrieves the secret from the secret region, 
+and how the entry region guarantees that the secret obtained will not be leaked.
+
+\subsection{Secrets placement issue on secret region}
+The previous section analyzed the reasons and methods of address randomization 
+for the fast call hidden region. Note that secrets on the secret region refer 
+to the addresses of the hidden regions. In addition, the address randomization 
+is performed at runtime. Therefore, the fast call mechanism cannot write the 
+secrets at compile time to the page that will be later mapped to the secret region.
+
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=0.8\textwidth]{images/secret_pages}
+  \caption[Short description]{Secrets on the page mapped to the secret region}
+  \label{fig:secret_pages}
+\end{figure}
+
+The figure \ref{fig:secret_pages} shows the workflow of fast call mechanism to write secrets into the secret region. 
+During the fast call registration process,
+the diver copies the file "secret" to a page and passes the page as a parameter to
+ the fast call infrastructure. The fast call infrastructure first creates an entry 
+ region and secret region for the fast call and maps the page to the secret region. 
+ Note that what is stored on the page is still dummy value \verb|0xFF| for now. The fast call 
+ infrastructure then creates a hidden region. Now that the fast call infrastructure 
+ already knows the hidden region address, it overwrites the dummy value with the hidden 
+ region address \verb|0x01| on the page by mapping the page to the kernel space. In this way, the fast call mechanism 
+ successfully writes the secret into the secret region.
+
+ \subsection{Secret movement between entry and secret region}
+ However, it is not enough to only place secrets
+ (addresses of the fast call hidden regions) on the fast call secret region. 
+ Since the secret region is only executable, the entry region's code cannot 
+ get the secrets out by reading the secret region's memory(using a pointer).
+To achieve the purpose of extracting the secret to the fast call entry region, 
+  we must use the help of \verb|mov|, \verb|jmp| instructions, and labels in assembly.
+
+ \begin{figure}[tbp]
+   \centering
+   \includegraphics[width=0.8\textwidth]{images/secret_pages_2}
+   \caption[Short description]{Secrets on the page mapped to the secret region, version 2}
+    \label{fig:secret_pages_2}
+ \end{figure}
+  
+ We place multiple \verb|mov| instructions on the page in the real implementation shown in Figure \ref{fig:secret_pages_2},
+ and a \verb|jmp| instruction follows each \verb|mov| instruction. Each dummy value in 
+ Figure \ref{fig:secret_pages} corresponds to a \verb|mov| instruction here. Unlike putting the 
+ dummy value directly on the page before, we put each in the first operand of
+  a \verb|mov| instruction. Therefore, after the fast call infrastructure creates a fast 
+  call hidden region, it overwrites the corresponding \verb|mov| instruction's 
+  operand (i.e., dummy value) on this page.  
+
+  Figure \ref{fig:secrt_page_3}  shows the method the fast call entry region use to retrieves a 
+  secret from the secret region. After the application invokes the 
+  fast call by a function pointer to the entry region, the entry region 
+  leverages instruction \verb|jmp| and label \verb|secret_region| to jump into the 
+  secret region and executes the instruction \verb|mov 0xF45, %rdi|. This 
+  instruction moves the secret \verb|0xF54|(the address of a fast call hidden region) 
+  to register \verb|%rdi| and then jumps back to the entry region to continue execution. 
+  Afterward, the entry region can access the hidden region through register \verb|%rdi|.
+  Note that we put  \verb|xor %rdi, %rdi| at the end of the entry region to ensure that the secret is not visible outside the entry region. 
+
+  \begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/secrt_page_3}
+    \caption[Short description]{The method the fast call entry region use to retrieves a 
+    secret}
+     \label{fig:secrt_page_3}
+  \end{figure}
+
+  \subsection{Overwrite the value on the secret page}
+
+  Overwriting the operands of the \verb|mov| instruction can be very tricky. 
+  The fast call mechanism needs to overwrite the operand of the corresponding 
+  \verb|mov| instruction on the secret page at runtime. It should be noted that 
+  the fast call mechanism needs to overwrite the machine code instead of 
+  assembly. The relationship between the machine code and assembly is 
+  shown below. Note that machine code is architecture-dependent. Therefore, the correspondent 
+  machine code of \verb|mov| instruction may be different on variant architecture.
+   
+
+  \begin{lstlisting}[style=CStyle]
+    /* assembly <---> machine code */
+    movq $0x7fffffffffff, %rsi  <---> 0x48 be ff ff ff ff ff  7f 00 00
+  \end{lstlisting}
+
+  In the code snippet, \verb|0x7fffffffffff| and \verb|%rsi| represent a dummy 
+  value and a register, respectively. At runtime, the fast call mechanism 
+  will overwrite the dummy value in the instruction with the address of a 
+  fast call hidden region. \verb|0x48 be ff ff ff ff ff  7f 00 00| represents the 
+  machine code corresponding to the instruction. According to the Intel manual, 
+  the bytes in the machine code have the following meanings:
+  
+  \begin{itemize}
+    \item \verb|0x48| indicates that the instruction is 64-bit.
+    \item \verb|0xbe| indicates that the instruction is a \verb|mov| instruction and the target register is \verb|%rsi|.
+    \item \verb|0xff ff ff ff ff 7f 00 00 | eight bytes represent the dummy value in Little Endian format
+  \end{itemize}
+  
+  The above analysis shows that the fast call mechanism needs to pay attention to 
+  the third part of the machine code, which is the dummy value in Little Endian 
+  format. In this case, the fast call mechanism defines a \verb|char*| variable that 
+  points to the instruction and increments it by 2 bytes to point to the 
+  dummy value \verb|0x48 be ff ff ff ff ff  7f 00 00|. And then, the fast call mechanism cast it to a \verb|uint64_t*|
+  pointer and replace the dummy value with the address of a fast call hidden 
+  region. Note here we use \verb|uint64_t*| since the hidden region address is 64-bit.
+
+  \begin{lstlisting}[style=CStyle]
+    /* pointor to the beginning of the  mov instruction */ 
+    char *poiter;
+    /* skip over 0x48 and 0xbe */ 
+    poiter += 2; 
+    /* 
+     * replace the dummy value with the address of a fast call hidden region 
+     */  
+    *((uint64_t*)poiter) = 0x7ffff7fc6000; 
+  \end{lstlisting}
+
+
+\subsection{Jump between fast call entry and secret region}
+
+Recall the fast call workflow. The fast call uses instruction \verb|jmp|, 
+and labels to jump back and forth between the entry and the secret regions. 
+Particularly, the instruction \verb|jmp label| is a relative jump. 
+The compiler calculates the offset(distance between the instruction \verb|jmp|
+and the label) at compile-time and replaces the label with the offset, i.e., 
+\verb|jmp label -> jmp offset|. The relative jump then jumps to a location relative to the current 
+instruction pointer at runtime, i.e., rip = rip+offset.
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.8\textwidth]{images/secret_page_4}
+  \caption[Short description]{The method the fast call entry region use to retrieves a 
+  secret, version 2}
+   \label{fig:secret_page_4}
+\end{figure}
+In our case, as shown in Figure \ref{fig:secret_page_4},  the fast call entry and fast call 
+secret regions code are pre-written in the file \verb|fastcall_functions|. 
+The first and second code snippets represent the code for the entry and 
+the secret regions, respectively. In addition,  Code snippets 1 and 2's 
+distance is set to 1 page.  At compile time, the compiler replaces
+\verb|entry_region| in \verb|jmp entry_region| and \verb|secret_region| in \verb|jmp secret_region|  
+with appropriate offsets.  
+
+During the fast call registration process(run time), 
+the driver copies the first and second code snippets to pages for entry and secret 
+regions, respectively, and passes them to the fast call infrastructure. 
+The fast call infrastructure creates the entry and secret regions and maps the 
+pages to those regions.  In particular, to ensure that the relative jump 
+offsets are valid after the pages are mapped to secret and entry regions, 
+respectively, fast call mechanism needs to do two things:
+
+
+\begin{itemize}
+  \item Create the secret region in a 1-page size.
+  \item The entry and secret regions must be adjacent, and the entry region is located above the secret region.
+\end{itemize}
+
+
+\section{Security issue elimination}
+
+As we know in the Design Chapter and the previous sections, our fast call 
+mechanism is less secure than traditional methods. The reason is that fast 
+calls run in user space. In this case, fast calls lose the protection of the kernel. Malicious users can attack fast call components in userspace directly and gain the device's control.
+
+
+Specifically, when the fast call entry area's code is running, a malicious 
+user can obtain its secret through the GDB debugger. The reason is that when 
+the code in the fast call entry region is running, the secrets are stored in 
+registers. An attacker can set a breakpoint at any code position in the entry
+ region and observe the secrets stored in registers.
+
+On the other hand, \verb|mprotect(2)| system call is a big problem. An attacker 
+can leverage the system call directly to read the secret from the secret 
+region since \verb|mprotect(2)| changes the secret region's access right from 
+executable to readable.  Note the secret region is nothing more special 
+than a virtual memory area with executable access rights. 
+
+In addition, the \verb|proc| file system has brought us a lot of trouble. 
+Each process's memory layout can be viewed by reading the file \verb|/proc/[pid]/maps| 
+created by the \verb|proc| file system. Therefore,  A malicious user can find out the 
+location of all hidden regions(device registers) by reading this file. This 
+mechanism makes all our previous efforts to isolate applications and devices 
+in vain since An attacker can bypass the fast call entry region to control 
+devices directly.  
+
+Last but not least, an attacker can set up exception handling reasonably and 
+explore every address in the address space to find out the location of hidden 
+regions. 
+
+The above scenarios break the isolation between the user and the device 
+provided by the fast system call mechanism and lead to security risks. 
+Therefore, we need to find a way to avoid them and adequately protect 
+devices from an attacker. In the rest of this chapter, we will further 
+explore the secret leakage that may be caused in these scenarios and 
+introduce our methods to avoid such information leakage.
+
+\section{GDB scenario}
+Now let's take a look at the GDB scenario first. 
+But before we start to introduce our remedies. We need to understand 
+how GDB works. GDB stands for GNU Debugger. Developers use it extensively for error 
+detection and error elimination. GDB itself can attach to a running 
+process and set breakpoints at any position in the attached process 
+and observe the changes in its registers and memory at any time. 
+
+
+The above GDB functions are implemented through the \verb|ptrace(2)| system call. 
+\verb|ptrace(2)| allows the parent process to observe and set the running mode of 
+the child process, set breakpoints in the child process, observe or 
+change the value of the child process's registers, and track the system 
+call of the child process.
+
+
+In general, there are two working modes in GDB. Figure \ref{fig:GDB_METHOD1} shows 
+the GDB's first workflow. A process starts running the GDB program, 
+and then GDB creates a child process through the fork system call. 
+The child process needs to do two things. First, the child process 
+invokes the \verb|ptrace(2)| system call to attaches its parent to itself. 
+Then the child process executes the test program through the \verb|exec(3)| 
+system call. Note that the GDB process is the \verb|tracer| and its child process 
+is the \verb|tracee|. After the above work is completed, the tracer can debug the
+code in \verb|tracee| through the \verb|ptrace(2)| system call.
+
+
+GDB can also debug the running process. As shown in Figure \ref{fig:GDB_METHOD2}, 
+the GDB process can turn the running process into its child process, 
+attach itself to the child process, and send \verb|SIGSTOP| to the child process. 
+The child process will stop running after receiving the \verb|SIGSTOP| signal, 
+indicating that it is ready to be debugged.
+
+All in all, for the \verb|tracee|, whether a running process or 
+a new process, GDB will turn the \verb|tracee| into its child process 
+through the \verb|tracee| system call. The  GDB can view  and modify 
+the \verb|tracee|'s data on the memory, stack, and registers.
+
 
 \cleardoublepage
 
 %%% Local Variables:
 %%% TeX-master: "diplom"
 %%% End:
+

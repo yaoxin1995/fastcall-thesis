@@ -21,8 +21,25 @@ DOC_BIB     ?= own.bib
 
 # images
 DOC_IMG_JPG  = images/squirrel.jpg # you can specify multiple images here
-DOC_IMG_PNG  =
-DOC_IMG_PDF  = images/diplom-aufgabe.pdf
+DOC_IMG_PDF  = images/fastcall_architecture.pdf
+DOC_IMG_PNG  = images/system_call_process.png
+DOC_IMG_PDF  = images/yaoxin_jing_signed.pdf
+DOC_IMG_PNG  = images/IOURING.png
+DOC_IMG_PNG  = images/Linux_networking.png
+DOC_IMG_PNG  = images/fastcall__design_idea.pdf
+DOC_IMG_PNG  = images/Stub_partition.pdf
+DOC_IMG_PNG  = images/registeration_process.pdf
+DOC_IMG_PNG  = images/fastcall_workflow.pdf
+DOC_IMG_PNG  = images/fastcall_table.pdf
+DOC_IMG_PNG  = images/Fast_Call_entries.pdf
+DOC_IMG_PNG  = images/mmap_search_methods.pdf
+DOC_IMG_PNG  = images/secret_pages.pdf
+DOC_IMG_PNG  = images/secret_pages_2.pdf
+DOC_IMG_PNG  = images/secrt_page_3.pdf
+DOC_IMG_PNG  = images/secret_page_4.pdf
+DOC_IMG_PNG  = images/GDB_METHOD2.pdf
+DOC_IMG_PNG  = images/GDB_METHOD1.pdf
+
 
 # latex stuff
 LUALATEX    ?= lualatex --synctex=1

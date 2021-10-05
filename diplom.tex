@@ -13,8 +13,12 @@
 ] {scrreprt}
 
 % You should select either american or british instead of english here:
-\usepackage[ngerman,english]{babel}
+\usepackage[ngerman,american]{babel}
 \usepackage{fontspec}
+\usepackage{color}
+\usepackage{float}
+
+\usepackage{xcolor}
 
 \usepackage[pdftex,
 citebordercolor={0.75 0.75 1},
@@ -24,8 +28,8 @@ linkbordercolor={0.75 0.75 1},
 urlbordercolor={0.75 0.75 1},
 pdfborder={0.75 0.75 1},plainpages=false,pdfpagelabels=true]{hyperref}
 \hypersetup{%
-  pdftitle={Dein Titel},
-  pdfauthor={Otto Mustermann},
+  pdftitle={Fast system call mechanisms avoiding privilege transition},
+  pdfauthor={Yaoxin Jing},
   pdfkeywords={foo, bar},
 }
 
@@ -39,19 +43,20 @@ pdfborder={0.75 0.75 1},plainpages=false,pdfpagelabels=true]{hyperref}
 %\date{30. April 2009}
 %\newcommand{\printdate}{\@date}
 
+
 \begin{document}
 
 \pagenumbering{Roman}
 
 \input{content/00_title.tex}
 
-\includepdf{images/diplom-aufgabe.pdf}
-\cleardoublepage
+\includepdf{images/yaoxin_jing_signed.pdf}
+%\cleardoublepage
 
 \input{content/01_disclaimer.tex}
 
 % NOTE: if you selected british or american above, change that here too
-\selectlanguage{english}
+\selectlanguage{american}
 
 \begin{abstract}
 \input{content/02_abstract.tex}

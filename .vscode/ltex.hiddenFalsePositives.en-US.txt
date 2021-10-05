@@ -1,0 +1,1 @@
+{"rule":"ENGLISH_WORD_REPEAT_BEGINNING_RULE","sentence":"^\\QCreate a fast call hidden regions for each device register set and map register sets to hidden regions.\\E$"}
