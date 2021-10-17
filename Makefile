@@ -22,7 +22,7 @@ DOC_BIB     ?= own.bib
 # images
 DOC_IMG_JPG  = images/squirrel.jpg # you can specify multiple images here
 DOC_IMG_PDF  = images/fastcall_architecture.pdf
-DOC_IMG_PNG  = images/system_call_process.png
+DOC_IMG_PNG  = images/system_call.png
 DOC_IMG_PDF  = images/yaoxin_jing_signed.pdf
 DOC_IMG_PNG  = images/IOURING.png
 DOC_IMG_PNG  = images/Linux_networking.png
@@ -37,8 +37,14 @@ DOC_IMG_PNG  = images/secret_pages.pdf
 DOC_IMG_PNG  = images/secret_pages_2.pdf
 DOC_IMG_PNG  = images/secrt_page_3.pdf
 DOC_IMG_PNG  = images/secret_page_4.pdf
-DOC_IMG_PNG  = images/GDB_METHOD2.pdf
 DOC_IMG_PNG  = images/GDB_METHOD1.pdf
+DOC_IMG_PNG  = images/GDB_METHOD2.pdf
+DOC_IMG_PNG  = images/MPROTECT.pdf
+DOC_IMG_PNG  = images/Seperateuserspace.pdf
+DOC_IMG_PNG  = images/sequence_file.pdf
+
+DOC_IMG_PNG  = images/fast_call_design_idea1.pdf
+DOC_IMG_PNG  = images/ring_protection.pdf
 
 
 # latex stuff

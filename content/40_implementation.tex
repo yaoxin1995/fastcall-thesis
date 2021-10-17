@@ -544,7 +544,7 @@ respectively, fast call mechanism needs to do two things:
 
 As we know in the Design Chapter and the previous sections, our fast call 
 mechanism is less secure than traditional methods. The reason is that fast 
-calls run in user space. In this case, fast calls lose the protection of the kernel. Malicious users can attack fast call components in userspace directly and gain the device's control.
+calls run in user space. In this case, fast calls lose the protection of the kernel. Malicious users can attack fast call components in user space directly and gain the device's control.
 
 
 Specifically, when the fast call entry area's code is running, a malicious 
@@ -578,7 +578,7 @@ devices from an attacker. In the rest of this chapter, we will further
 explore the secret leakage that may be caused in these scenarios and 
 introduce our methods to avoid such information leakage.
 
-\section{GDB scenario}
+\subsection{GDB scenario}
 Now let's take a look at the GDB scenario first. 
 But before we start to introduce our remedies. We need to understand 
 how GDB works. GDB stands for GNU Debugger. Developers use it extensively for error 
@@ -587,12 +587,18 @@ process and set breakpoints at any position in the attached process
 and observe the changes in its registers and memory at any time. 
 
 
-The above GDB functions are implemented through the \verb|ptrace(2)| system call. 
+GDB are implemented through the \verb|ptrace(2)| system call. 
 \verb|ptrace(2)| allows the parent process to observe and set the running mode of 
 the child process, set breakpoints in the child process, observe or 
 change the value of the child process's registers, and track the system 
 call of the child process.
 
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=0.8\textwidth]{images/GDB_METHOD1}
+  \caption[Short description]{First GDB workflow}
+  \label{fig:GDB_METHOD1}
+\end{figure}
 
 In general, there are two working modes in GDB. Figure \ref{fig:GDB_METHOD1} shows 
 the GDB's first workflow. A process starts running the GDB program, 
@@ -605,19 +611,286 @@ is the \verb|tracee|. After the above work is completed, the tracer can debug th
 code in \verb|tracee| through the \verb|ptrace(2)| system call.
 
 
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=0.8\textwidth]{images/GDB_METHOD2}
+  \caption[Short description]{Second GDB workflow}
+  \label{fig:GDB_METHOD2}
+\end{figure}
+
 GDB can also debug the running process. As shown in Figure \ref{fig:GDB_METHOD2}, 
 the GDB process can turn the running process into its child process, 
 attach itself to the child process, and send \verb|SIGSTOP| to the child process. 
 The child process will stop running after receiving the \verb|SIGSTOP| signal, 
 indicating that it is ready to be debugged.
 
-All in all, for the \verb|tracee|, whether a running process or 
+All in all, for the \verb|tracee|, whether it is a running process or 
 a new process, GDB will turn the \verb|tracee| into its child process 
-through the \verb|tracee| system call. The  GDB can view  and modify 
+through the \verb|ptrace(2)| system call. Afterward, the GDB can view and modify 
 the \verb|tracee|'s data on the memory, stack, and registers.
+
+As we mentioned before, the entry region's code retrieves secrets 
+from the secret region through registers and keeps them until the code 
+returns. Therefore, An attacker can leverage GDB  to obtain the secrets 
+and gain control of a device.  Note that GDB is only an example of obtaining 
+secrets based on \verb|ptrace(2)|. Any attacker can imitate the two working modes of 
+GDB and use \verb|ptrace(2)| to obtain secrets from entry region as fast call is running.
+
+In general, it is hard to avoid a process that is about to or has 
+registered fast calls from being tracked by \verb|ptrace(2)|. Especially in the 
+first GDB  working model, the child calls \verb|ptrace(2)| to attach itself 
+to its parent then execute the test file registering for fast calls. 
+In this case, we can't let the \verb|ptrace(2)| handler function reject the 
+child's request since the handler function does not know that 
+the child will execute the test file registering for fast calls. 
+Once the child has been traced and executes the test file, the fast 
+call infrastructure can't detach the child since \verb|ptrace| does not allow 
+\verb|tracee| been detached by itself.
+
+Our goal is to prevent the tracer from reading the 
+\verb|tracee|'s registers when \verb|tracee| has registered fast calls. 
+Since the tracer exploits \verb|ptrace(2)| to reads \verb|tracee|'s registers, 
+we can let the \verb|ptrace(2)| handler function check whether \verb|tracee| has 
+registered fast calls before returning the data in \verb|tracee|'s registers.
+
+
+Specifically, we introduced a new variable \verb|fastcall_registered| 
+in Process address space descriptor \verb|mm_struct(2)| qto mark whether an
+address space has fast calls. When the tracer process exploits \verb|ptrace| 
+to view the \verb|tracee|'s register, \verb|ptrace(2)| handler function can judge whether
+\verb|tracee| has registered fast calls by checking \verb|fastcall_registered| in 
+the \verb|tracee|'s address space descriptor. If \verb|tracee| has already 
+registered fast calls, \verb|ptrace(2)| system call handler function should 
+directly return error \verb|EPERM| to the tracer, indicating that this 
+operation is not permitted.
+
+The variable \verb|fastcall_registered| is managed by fast call 
+infrastructure. During the fast call registration process,  
+the fast call infrastructure sets \verb|fastcall_registered| in the current 
+\verb|mm_struct| to true. On the other hand, at the end of the fast call 
+deregistration process, the fast call infrastructure checks whether 
+the current address space still has fast calls. It set \verb|fastcall_registered|  
+to false if the current address space does not have fast calls anymore.
+
+It should be noted that when a process is created, we initialize 
+the \verb|mm_struct|'s member \verb|fastcall_registered|  to false because 
+the fast call mechanism prohibits two processes from sharing fast calls.
+ In other words, when process A uses \verb|fork()| to create a child process B, 
+ process B will not copy the virtual memory areas belonging to fast calls in A, 
+ which means that process B has not registered any fast calls. 
+ Therefore, we should set \verb|fastcall_registered|  in B's address space 
+ descriptor to false when B initializes its address space descriptor.
+
+ The advantage of having variable \verb|fastcall_registered| in the address space 
+ descriptor is obvious.  We have avoided secrets leakage from \verb|ptrace| under 
+ multithreading. All operations of \verb|ptrace|, including attachment and detachment, 
+ are per thread. Note that threads and processes are represented by \verb|task_struct|
+ in the kernel, and the only difference between them is that threads share 
+the same address space descriptor. Therefore, we add \verb|fastcall_registered| 
+in the address space descriptor to prevent secrets leakage from any thread 
+been traced if its address space has fast calls.
+
+\subsection{mprotect}
+As we mentioned earlier, an application can call \verb|mprotect(2)|  
+system call to change the address space's access protection, 
+e.g., changing the access right of a particular area in the address 
+space from executable to readable.  A malicious user can leverage the 
+\verb|mprotect(2)| to change the access right of a fast call's memory areas to 
+damage the fast call. Specifically, an attacker can change the fast 
+call entry region's access right from readable to writable so that the attacker can overwrite 
+the code mapped on this region to change the fast call's behavior. 
+Another attack path is that the attacker directly changes the secret 
+region's access right from executable only to readable. In this way, 
+the attacker can read the secrets on the secret region and bypass the 
+fast call to manipulate a device.
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.8\textwidth]{images/MPROTECT}
+  \caption[Short description]{MPROTECT workflow}
+  \label{fig:MPROTECT}
+\end{figure}
+
+Figure \ref{fig:GDB_METHOD1} shows how fast call mechanisms avoid \verb|mprotect(2)| 
+changing the access right of fast calls'virtual memory areas. 
+Note that the process address space is composed of virtual memory areas.  
+When \verb|mprotect(2)| system call is called to change the access rights on a 
+consecutive address range in the process address space, the \verb|mprotect(2)| 
+handler function in the kernel validates the incoming parameters. 
+If the request from user space is legal, the handler function will 
+traverse all \verb|VMAs| in the address range specified in the parameters
+ and change the access right of each VMA. Therefore, while the function 
+ traverses all the \verb|VMAs| in the address segment, we could add the following 
+ code to check whether a \verb|VMA| belongs to fast calls that the current process 
+ has registered. If the \verb|VMA| belongs to a fast call, the handler function 
+ should terminate and return an error before changing the \verb|VMA|'s access right.
+
+\begin{lstlisting}[style=CStyle]
+  if (vma_is_special_mapping(vma, &fastcall_pages_mapping))
+    goto out;
+\end{lstlisting}
+ 
+
+\subsection{Prevent attacker from explore the address space}
+Now we have to face the direct attack on the hidden region. 
+The hidden region represents the device registers mapped to the
+ process address space in a fast call. The fast call entry region 
+ can obtain the address of a  hidden region from the secret region and
+  control the device to complete specific operations. Because the 
+  registers are directly mapped to the user space, all operations 
+  on the registers are as fast as ordinary memory access. However, 
+  this also brings considerable problems. Malicious users can 
+  leverage the fast call mechanism to map registers of a device 
+  they want to control to their address space and then explore the 
+  entire address space to get the location of the registers. 
+  In other words, a malicious process can reasonably set its 
+  action on the segmentation fault and explore the victim's 
+  entire address space to find the hidden area.
+
+Generally speaking, \verb|segfault| is caused by two reasons. 
+The first reason is that a process has accessed an address 
+that it does not have permission to access, and the other 
+reason is that a process has accessed an address that the 
+kernel has not allocated. We are more interested in the 
+second case in this section. In this case, the kernel sends 
+SIGSEGV signal to the process. By default,  the process will 
+terminate when it receives SIGSEGV.  However, a process can 
+change its action on a signal through \verb|sigaction(2)|. This 
+means that a process has the ability to ignore SIGSEGV 
+and continue to run. Another possibility is that a process 
+can use \verb|mmap(2)| to allocate memory for all unallocated 
+areas in its address space. In this way, when the attacker 
+explores the entire memory space, segfault will not occur at all.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.8\textwidth]{images/Seperateuserspace}
+  \caption[Short description]{Prevent attacker from explore the address space}
+  \label{fig:Seperateuserspace}
+\end{figure}
+
+
+The fast call mechanism must avoid an attacker from 
+exploring the address space in those two ways. Figure 
+\ref{fig:Seperateuserspace} shows that all process address space is divided into 
+two parts if the kernel enables the fast call mechanism. 
+The lower part is used as the original address space to 
+allocate such as stacks, program code segments, etc., 
+while the upper part is dedicated to allocating all 
+fast calls' hidden regions.  We prohibit any request 
+to allocate memory in the upper half of the address 
+space except requests from fast calls. In other words, 
+a process cannot call \verb|mmap(2)| to allocate memory in the 
+upper half of the address space.
+
+In addition, we have changed the signal that the kernel 
+sends to the process when the segmentation fault occurs 
+in the upper half of the address space. Specifically, 
+when a process accesses an unallocated memory address 
+in the upper half of the address space, the kernel page 
+fault handler will send \verb|SIGKILL| to the process instead 
+of \verb|SIGSEGV|. The advantage of \verb|SIGKILL| is that the process 
+cannot change its action when receiving the signal. 
+More specifically, when the process receives this signal, 
+the process has no choice but to kill itself.
+
+To sum up, the fast call mechanism divides the address 
+space into two parts so that the hidden regions have 
+exclusive space, which significantly reduces the risk 
+of being attacked. Because, in this case, a malicious 
+user has only one chance to determine the location of 
+a hidden region, therefore, can no longer find them by
+ exploring the entire address space.
+
+
+\subsection{Prevent attacker from explore the address space}
+After understanding how the fast call mechanism solves the 
+possible attacks against different components in the fast call, 
+let us finally look at the security vulnerability that has the most 
+severe impact on the fast call and is also the most easily exploited 
+by malicious users. That is the file, \verb|/proc/pid/maps|.
+If someone prints the file with the command \verb|cat /proc/pid/maps| in the shell, 
+as shown in the figure, the process \verb|PID|'s memory layout is shown in the shell. 
+From the kernel's perspective, each row in the figure stands for a virtual 
+memory area. In addition, the kernel manages all \verb|VAMs| in a process through a list. 
+As mentioned above, the three components in a fast call, the entry, secret and hidden region, are just 
+three virtual memory areas in the process address space. Therefore, when 
+a process has registered for fast calls, the kernel will include each 
+component's information about fast calls when generating the process's 
+\verb|proc/pid/maps|file, such as the start address and end address of the fast 
+hidden region.
+
+
+\begin{lstlisting}[style=BASHStyle]
+  #!/bin/bash
+  #!sudo cat /proc/1/maps
+  7fd9b1f77000-7fd9b1f78000 r--p            /usr/lib/x86_64-linux-gnu/ld-2.31.so
+  7fd9b1f78000-7fd9b1f79000 rw-p            /usr/lib/x86_64-linux-gnu/ld-2.31.so
+  7fd9b1f79000-7fd9b1f7a000 rw-p  
+  7ffe334f0000-7ffe33511000 rw-p            [stack]
+  7ffe33594000-7ffe33598000 r--p            [vvar]
+  7ffe33598000-7ffe3359a000 r-xp            [vdso]
+  ffffffffff600000-ffffffffff601000 --xp    [vsyscall]
+\end{lstlisting}
+
+
+This file is highly harmful to the fast call mechanism since 
+it leaks all information about the fast calls that the fast call 
+mechanism tries to hide. Therefore, we must avoid the kernel from 
+including information about fast calls when generating this file. 
+Before explaining how the fast call mechanism solves this security 
+vulnerability, let us first look at how this file is generated.
+
+The file is a virtual file dynamically generated by the process 
+information pseudo-filesystem (\verb|PROC|). Specifically, \verb|PROC| automatically 
+generates the file according to the process address space's memory 
+layout when a user opens the file. Therefore, when the memory layout 
+of the process changes, the content of the file changes as well. 
+In the kernel, the file supports four operations, namely, opening 
+the file (\verb|open|), reading the content of the file (\verb|read|), changing 
+the starting position of reading the file (\verb|llseek|), and closing the 
+file (\verb|release|). A sequence file completes \verb|VAM|'s traversal in the 
+process address space. In other words, these four operations encapsulate 
+a sequence file and call the corresponding function in the sequence file. 
+For example, the file opening operation will create a sequence file 
+corresponding to the file in the kernel, and the read operation exploits 
+functions provided by the sequence file to traversal \verb|VAMs| and copy all 
+\verb|VAMs|'information(the memory layout of the process)to user space, etc.
+ 
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=6cm,height=9cm]{images/sequence_file}
+  \caption[Short description]{Sequence file workflow}
+  \label{fig:sequence_file}
+\end{figure}
+
+The sequence file is an iterator provided by \verb|PROC|, which is 
+specially used to traverse the kernel data structure such as a 
+list to generate virtual files. As shown in Figure \ref{fig:sequence_file}, this 
+iterator consists of four methods, namely start(), next(), 
+stop() and show(). Its working principle is very similar to 
+the iterator in C++. In our pattern, since the kernel manages 
+all \verb|VAMs| in the process address space in a list, the start() 
+function will be used to initialize the iterator that traverses 
+the \verb|VAM| list. The next() function will move the iterator forward 
+to the next \verb|VAM|  n the list. The show() function is equivalent to 
+the dereference operator in C++. It obtains the \verb|VAM| pointed to by 
+the iterator, writes the information about the \verb|VAM| into a buffer 
+whose contents will be copied to the user space later. If the 
+traversal is complete, stop() is called to destroy the iterator.
+
+Therefore, the idea about preventing information leaks is the
+ same as what we did in \verb|mprotect(2)|. We add some code in show() to 
+ check whether the \verb|VAM| belongs to a fast call.  If the \verb|VAM| 
+ belongs to fast calls, the show function should skip the \verb|VAM| 
+ instead of adding information about this \verb|VAM| to the buffer. 
+ In this way, the file does not show any information about 
+ fast calls' components anymore
+
 
 
 \cleardoublepage
+
+
 
 %%% Local Variables:
 %%% TeX-master: "diplom"

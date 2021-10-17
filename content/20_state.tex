@@ -1,4 +1,4 @@
-\chapter{Technical Background and Motivation}
+\chapter{Technical Background and Related Work}
 \label{sec:state}
 
 % Hier werden zwei wesentliche Aufgaben erledigt:
@@ -34,175 +34,230 @@
 %\todo{write state}
 
 \section{Technical Background}
-In this section, we will introduce some basic knowledge 
-you need to know in order to better understand the paper. 
-Such as Privilege Transitions,Meltdown attack, Spectre attack and sequence files.
+In this chapter, we first introduce the privilege transition. Then we motivate our new 
+design by discussing the limitations of privilege 
+transition we fund. Furthermore, we provide you a general overview of 
+meltdown and similar vulnerabilities since our new design is greatly 
+influenced by those vulnerabilities. In the end, we survey other techniques 
+aiming for high-performance IO operation.
 
 \subsection{Privilege Transitions}
-Due to security issues, most operating systems now use a protection ring 
-mechanism to isolate user-kernel-land. As wiki explained \textquote{A protection 
-ring is one of two or more hierarchical levels or layers of privilege within the 
-architecture of a computer system. This is generally hardware-enforced by some CPU 
-architectures that provide different CPU modes at the hardware or microcode level. 
-Rings are arranged in a hierarchy from most privileged (most trusted, usually numbered zero) 
-to least privileged (least trusted, usually with the highest ring number). On most operating systems,
- Ring 0 is the level with the most privileges and interacts most directly with the physical 
- hardware such as the CPU and memory.}
-In other words, a program running in user space is untrustworthy because it may be 
-an attacker. Therefore, CPU and operating system developers proposed protection rings 
-to protect critical resources, such as physical memory, device memory, and scheduler information. 
-For instance, the Linux operating system in x86 protected mode uses ring 0 for the kernel and ring 3 
-for users. Compared to processes in ring 0 that can do anything, processes in ring 3 cannot touch any critical 
-resources. In addition, the most important thing is that processes in ring3 cannot change its ring itself. 
-Otherwise, it may set itself to ring0 and destroy the kernel space.
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.8\textwidth]{images/ring_protection}
+  \caption[Ring protection mechanisms]{Ring protection mechanisms}
+  \label{fig:ring_protection}
+\end{figure}
+System calls are the most common communication method between devices and applications.  
+An application can't access devices directly because device memory typically resides in 
+ kernel and is protected by the ring protection.  While the ring protection provides security, 
+ it forces the user-land application to do the privilege transition if the application needs to 
+ manipulate a device.
 
-If the program wants to communicate with the device, how can it achieve this goal without changing 
-itself to ring 0? The answer is Privilege Transitions. To help user-level processes use resources 
-in the kernel, the kernel exposes API called system calls to provide various services, as shown in Figure 1. 
-Through this API, the kernel can verify requests from user space before providing services. On top of 
-improving system security, the protection ring mechanism and system calls make the program in ring 3 
-also more flexible. Because the program does not have to worry about overwriting the memory of other 
-processes, nor does it have to compete with others for permission to use devices. All this dirty work 
-is treated as a request in the kernel and managed correctly by it.
 
-While this mechanism improves system security and the flexibility of user-level processes, 
-it also introduces a significant performance penalty. In the following chapter, we will 
-analyze the reason for the performance penalty caused by system calls and propose a new 
-mechanism to address this issue. 
 
-\subsection{Meltdown attack}
+ Most operating systems employ the protection ring mechanism to isolate user-kernel land. 
+ Figure ~\ref{fig:ring_protection} provides a sketch of this mechanism. Typically, it has multiple different privilege levels, 
+ ring0 to ring n. While ring 0 is the most privileged level, ring n is the least privileged
+ Note that this mechanism is enforced by hardware, i.e., the CPU provides different running modes 
+ to fit this mechanism.  Specifically, X86 architecture support 4 level ring mechanism, i.e., 
+ ring 0 and ring 3.  Ring 0 (the kernel land)is the most privileged level, which contains critical 
+ resources and sensitive data such as device memory, scheduler information, and physical memory. 
+ On the contrary, ring 3 is called user land where untrusted applications/processes are running.  
+ Compared to processes in ring zero that can do anything, processes in ring 3 cannot touch any 
+ critical resources.
 
-OS security is always a big concern for system engineering. 
-Over decades most operating system security methods and theory are based on memory isolation, 
-e.g., the protection ring mechanism. But With the discovery of meltdown, all attempting to protect 
-OS based on memory isolation and parevirtualized environment are failed.
 
-The Specter set of vulnerabilities does not target specific modern hardware defects, 
-but rather refers to the optimization strategy “Branch Prediction” and "Out of order execution" 
-commonly used by CPU, combined with the side-channel attacks to access arbitrary secret data.
-Hence, it is extremely difficult to achieve a comprehensive defense.
+ The kernel use system calls to provide various services to user-level processes, i.e., the processes 
+ can indirectly use critical resources in the kernel through system calls. This workflow has 2 major 
+ advantages. First, it has improved system security. The kernel can validate requests that come from 
+ user space before providing services. Therefore, a malicious process can not intentionally sabotage 
+ critical resources protected by the kernel. Secondly, the combination of the ring protection 
+ mechanisms and system calls gives user-level process flexibility. A user-level process does not 
+ have to worry about contention with others for critical resources managed by the kernel. Because 
+ it is the kernel's responsibility to determines the order in which the process uses the resource. 
+ 
 
-The Meltdown is the simplest and most well-known attack in this series of vulnerabilities. 
-In order to explain the principle of the meltdown vulnerability, we need to integrate 
-three aspects of knowledge: virtual memory, out-of-order execution, and cache-based side-channel 
-attack such as flush and reload.
+ However, the ring mechanism also introduces a significant performance loss. 
+ This is because that the user-land and kernel-land are isolated. Whenever a user-land 
+ process enters the kernel land through system calls, it must cross the user-kernel boundary 
+ and perform privilege transition.  The process of privilege transition is quite complex. 
+ It involves multiple times saving and restoring of registers, CPU mode switch(user to privilege mode), 
+ permission checking, etc. Thus, the privilege transition is very costly.
 
-As we all known, Modern OS is based on virtual memory to fill the gap between 
-large program and relative small physical memory and isolate each process from 
-each other. In other word, each program has it's own virtual memory space that is 
-divided into 2 parts "user space" and "kernel space" , and Virtual pages are mapped 
-to physical pages at page size granularity according to page table.. User space can
-only be access by program itself, while only process in kernel mode have ability to 
-run in kernel space. In order to facilitate the memory access, all physical page can
-be mapped into kernel space, e.g., Process in kernel mode can access all data no
-matter where it is. In particuler,  Virtual memory are mapped to physical memory 
-at page size granularity according to page table. Normally user space and kernel
-space virtual memory leverage the same page table to 
-convert virtual address to physical address.
- To isolate user and kernel space, there will be 
- a User/Supervisor bit in each page table entry to specify 
- whether user mode can be accessed. The goal of the meltdown 
- is to break the above-mentioned isolation between user mode and kernel mode, 
- and let process in user mode have the ability to access all physical memory.
+ Now, let us take a look at the system call's workflow. From it, you can be aware of 
+ how complex and expensive the privilege transition can be.
+ \begin{enumerate}
+  \item User-land processes employ a wrapper function provided by the c library to invoke system calls.
+  \item The arguments are passed to the wrapper function through the stack. However, the kernel requires system call arguments passing by 6 registers. Therefore, the wrapper function has to copy arguments from its stack to registers.
+  \item Each system call has a unique number to identify itself from other system calls. The wrapper function needs to specify this system call number and save it in the register \%eax.
+  \item The wrapper function executes the syscall instruction.  This instruction notifies the CPU to perform the mode switch(user to privilege mode) then jump to the os-level system call handler.
+  \item In the handler:
+  \begin{enumerate}
+    \item User page table and stack are switched to kernel page table and stack.
+    \item Registers are saved to the kernel stack.
+    \item The system call number and arguments are validated. Then, according to the number, the handler searches the system call table place on the memory to find the corresponding system call service routine.
+    \item The handler calls the system call service routine and passes the system call arguments to it.
+    \item After the routine is completed, it returns the results to the handler.
+    \item Registers are restored, page table and the stack are switched back.
+    \item The handler returns the results and notifies the CPU to switch back to user mode.
+  \end{enumerate}
+  \item The wrapper function gets the returned value from the handler through the register \%rax and forwards it to the user-land process.
+  
+\end{enumerate}
 
-Meltdown uses a hardware feature called out-of-order execution to 
-achieve this goal. The decoded instructions on modern CPUs that support 
-"out-of-order execution" are sent to the CPU scheduler. Once the operand 
-of an instruction is available, the CPU execution unit will immediately 
-execute the instruction regardless of the order in the code. But results of 
-each out-of-order executed instruction are back to the user in order of 
-instruction fetch. This is called In-Order Commit. In particular,  
-all privilege checking and exception handling are processed during 
-the Instruction in-Order Commit period. If the privilege checking is 
-failed or an exception is caused by one instruction, the result of this 
-instruction and the following are dropped, and the CPU rolls back to a sane state. 
+ 
+ 
+ 
+ 
 
-While out-of-order code execution brings performance improvements, 
-it also brings obvious security drawbacks. The reason comes from 2
- aspects. On the one hand, CPUs can execute instructions before checking 
- their privilege. It means CPU on user mode may execute instructions 
- belonged to the kernel accidentally. On the other hand, the effect of 
- instructions conducted but not committed may stay visible on cache, 
- although the CPU drops the result of that kind of instruction during 
- the in-order commit period.
+ 
 
-Since the effect of instructions conducted but not committed remains 
-in the cache, in the case of meltdown attack, an attacker could leverage
- the cache to extract confidential and other data that the attacker wants
-  to know. This is called cache side-channel attack, more specifically, 
-  flush + reload attack. In simple terms, an attacker flushes the cache 
-  in advance; after the illegal instruction has been executed, the 
-  attacker can judges whether the illegal instruction has accessed a 
-  specific piece of data during this period
-
-In summary, Meltdown vulnerability can leak all privileged 
-information by exploit hardware feature called out of order execution 
-and cache side-channel attack. This vulnerability is dependent to hardware.
- Hence, this attack is highly versatile, and it is extremely difficult to achieve a comprehensive defense.
-
-Kernel developer brings KPTI(Kernel page table isolation) to protect 
-the kernel from meltdown attacks. In simpler terms,  Kernel and 
-user-level processes have different page tables, which means the 
-out-of-order executed instruction on user mode can't touch any memory 
-in the kernel because of the different page tables between kernel and user level processes.
-\subsection{Spectre attack}
-
-Spectre vulnerability is very similar to 
-Meltdown vulnerability. It bases on transient 
-execution as well. But compared to transient 
-execution in Meltdown vulnerability caused by 
-out of order execution,  transient execution 
-in Spectre vulnerability is related to branch 
-prediction mistraining. 
-
-Since branch instruction may include memory access, 
-it may need several clocks to retrieve data from memory.
-Hence, CPU is designed to have a branch prediction unit 
-to execute branches based on historical branch execution 
-speculatively. The branch execution unit has two parts,
-Conditional Branch direction predictor and Target address 
-predictor. Conditional branch direction predictor is 
-in charge of predict whether the condition of one branch is true.
-The responsibility of the target address predictor predicts the 
-target address of indirect branches.
-
-An attacker can take advantage of this CPU feature and writes many wrong samples into the branch prediction unit in advance so that the branch prediction unit makes an incorrect prediction of the branch that is about to be executed in the victim's process. In this way, the CPU will execute code that should not be executed in advance. Through the above operations, the attacker can force the CPU to access any location in the victim's address space. Although the CPU will eventually write back these codes and execute the correct branch, the results of these code executions will be kept in the cache. Thus, the attacker can read the secrets saved by the victim by viewing the changes in the cache.
-
-In short, The attack process between spectre and meltdown 
-is quite similar, except that spectre requires prediction 
-mistraining. In particular, in spectre vulnerability attacker
- can only get data that the victim has the right to access.
+ 
 
 
 
 
+ 
+ 
+\subsection{\emph{Meltdown} attack}
+
+The CPU side-channel attacks such as \emph{meltdown} and \emph{spectre} are mainly based on 
+CPU speculative execution and microarchitecture side channel such as caches. 
+In general, accessing memory and some other operations can be expensive. 
+In order to prevent the CPU from busy waiting(Pipeline stalling), 
+the CPU allows instructions to execute out of order, i.e., independent 
+instructions in a code snippet can be proceeded in parallel. After the out-of-order 
+executed instructions are completed,  the CPU reorders them and retires(commits the 
+results of the instructions) them one by one. Note that the CPU retires one instruction 
+only if it is certain that all previous instructions are retired successfully, and the 
+instruction has passed the permission check.  Specifically, in the context of memory access, 
+the Intel CPU checks the permission control bits on the page table entry(during the 
+instruction retirement stage) after it accessed the memory. 
+Previously, this was considered safe since the CPU undo everything and reverts 
+its state if the permission check fails.
+However, clever attackers find out that the CPU does not actually clear all the 
+failed instruction's effects on computer microarchitecture. For instance, 
+the record in the cache is not cleared if memory access-related instruction 
+fails because of the page table permission check. Thus, an attacker can employ 
+\emph{clflush} instruction to flush the cache in advance then lets the CPU speculatively 
+executes an instruction that reads a secret. Finally, the attacker can get the secret 
+by timing the cache(flush and reload).
+
+Now let us view a code snippet from MIT 6.828\cite{1}, which shows how meltdown works. 
+\begin{lstlisting}[style=CStyle]
+  char buf[8192]
+
+  // the Flush of Flush+Reload
+  clflush buf[0]
+  clflush buf[4096]
+
+  <some expensive instruction like divide>
+
+  r1 = <a kernel virtual address>
+  r2 = *r1
+  r2 = r2 & 1      // speculated
+  r2 = r2 * 4096   // speculated
+  r3 = buf[r2]     // speculated
+
+  <handle the page fault from "r2 = *r1">
+
+  // the Reload of Flush+Reload
+  a = rdtsc
+  r0 = buf[0]
+  b = rdtsc
+  r1 = buf[4096]
+  c = rdtsc
+  if b-a < c-b:
+    low bit was probably a 1
+\end{lstlisting}
+
+In this code snippet, an attacker exploits the out-of-order execution and 
+microarchitecture side channel to read the secret out of kernel memory. 
+The attacker first allocates a buffer with 8192 bytes. Then the attacker uses 
+\emph{clflush} to clear any records related to \emph{buf[0]} and \emph{buf[4096]} in the cache. 
+Next, we let the CPU execute a costly instruction that may take more than 1000 cycles. 
+In order to prevent any performance loss, instead of waiting for the completion of the instruction,  
+the CPU(multi-cores) speculatively execute the following instructions(line 11-13). 
+Because those instructions are executed out of order, the CPU chooses to run them and does 
+not care whether the current process has permission to access this kernel memory. 
+After the CPU completes the CPU in line 13, the CPU decides to reorder all speculatively 
+executed instructions and retires them one by one. At this point, the CPU finally 
+realizes that the current process does not have permission to access kernel memory 
+according to PTE\_U (the page table entry user bit), then reverts the state of itself. 
+However, the result of the instruction \emph{r3 = buf[r2]} has already been cached. Therefore, 
+the attacker can guess the first bit of the kernel address through cache timing. 
+
+Since the meltdown is a hardware-based vulnerability, it is hard to prevent the attacker 
+from exploiting it. One intermediate solution is KPTI\cite{2}, which separates the original page 
+table into two page tables, i.e., user and kernel page table.  While the kernel page table 
+contains all sensitive data, each user page table only includes the data belonging to one process. 
+In this case, the instruction(line 10) in the above code snippet would cause a segfault if 
+a process tries to run the code on its user space. Because the user page table does not contain 
+the mapping between the kernel virtual address in r1 and the physical address anymore. Therefore, 
+a malicious process can not read any secret in the kernel through meltdown anymore. However, 
+it also brings overhead when operations like system calls need to cross the user-kernel boundary 
+since the page table must be switched back and forth.
+
+\subsection{\emph{Spectre} attack}
+
+\emph{Spectre} is similar to meltdown vulnerability. It also bases on speculative 
+execution and microarchitecture side channel such as caches. However, unlike meltdown the 
+\emph{Spectre} attack manipulates a unit in the CPU called branch predictor to execute some wrong 
+code that can steal secrets.  The branch predictor can generally be used in 3 places:
+
+
+
+
+
+\begin{enumerate}
+  \item The branch direction prediction,  such as if(valid).
+  \item The branch target prediction, such as jmp [eax].
+  \item The return stack buffer, such as instruction return.
+\end{enumerate}
+In the following description, we use branch direction prediction as an example to show 
+how \emph{Spectre} works.  Specifically, there are 2 different methods to exploit the branch 
+predictor during the branch prediction.  In the first method, the attacker first mistrains 
+the predictor by executing some branches intentionally.  In this case, many wrong records 
+are written into the branch predictor. Then the attacker executes a carefully selected branch. 
+Due to the branch predictor mistraining, the predictor may choose the wrong branch to do 
+speculative execution.  In the wrong branch, secrets can be read out of memory and cached. 
+Later, the attacker can get the secrets through cache timing.
+
+In the second method, 
+because the branch predictor is shared by all processes running on the same CPU, 
+a malicious process can write wrong samples into the predictor so that the victim process will 
+jump to a carefully selected code snippet(the gadget) through a wrong branch prediction. 
+After the execution of the gadget, secrets can be cached into the cache. Later, the attacker 
+can get the secrets through cache timing.
 
 \section{Related work}
-The IO(INPUT-OUTPUT) refers to data transformation
-between user processes and various devices.
-A complete IO is usually divided into 2 phases: 
-privilege transitions between user space and kernel 
-space, communication between kernel space and device 
-space. In recent years, with the continuous improvement 
-of device IO speed, The overhead of IO operations 
-in the kernel has became not negligible anymore. 
-To address this problem, Clever developer proposed many 
-approaches. In this section, we will cover some of them,
-which aim for alleviating the IO performance 
-bottleneck caused by the kernel
+The IO refers to data transformation between user-level processes 
+and various devices. A complete IO is usually divided into 2 phases:
+\begin{itemize}
+  \item Privilege transitions between user space and kernel space.
+  \item Communication between kernel space and device space.
+\end{itemize}  
+In recent years, with the continuous improvement of device IO speed, 
+The IO operations' overhead in the kernel has become not negligible anymore. 
+To address this issue, clever developers proposed many approaches. 
+This section will cover some of them, which aim to alleviate the IO 
+performance bottleneck caused by the kernel.
 
 \subsection{VDSO}
-Let us first look at vDSO. vDSO stands for Virtual Dynamic Shared Object, 
-which accelerates some read-only system calls by mapping pages containing 
-relevant information and codes to user space [2].In particular, the pages are 
-mapped both to user and kernel space. While the page in the kernel is writable, 
-the mapping containing the page in user space is read-only, and the mapping address 
-is randomized against the attacker.  vDSO improves IO performance, 
-but it also has obvious limitations. That is, all codes and data related to vDSO in 
-the user space are read-only. If the program wants to transfer data to the device, 
-it can only enter the kernel or try other methods. Therefore, vDSO is still regarded as an 
-IO slow path in the communication context between the application and the device
 
+Let us first look at \verb|vDSO|. \verb|vDSO| stands for Virtual Dynamic Shared Object, 
+which accelerates some read-only system calls by mapping pages containing 
+relevant information and codes to user space. In particular, the pages are 
+mapped both to user and kernel space. While the page in the kernel is writable, 
+the mapping containing the page in user space is read-only, 
+and the mapping address is randomized against the attacker.  
+\verb|vDSO| improves IO performance, but it also has obvious limitations. 
+That is, all codes and data related to \verb|vDSO| in the user space are read-only. 
+If the program wants to transfer data to the device, it can only enter the 
+kernel or try other methods. Therefore, \verb|vDSO| is still regarded as an 
+IO slow path in the context of the communication  between the application 
+and the device,
 \subsection{IOURING}
 \begin{figure}[tbp]
   \centering
@@ -210,29 +265,38 @@ IO slow path in the communication context between the application and the device
   \caption[Short description]{IOURING}
   \label{fig:IOURING}
 \end{figure}
-IOuring is introduced in Linux version 5.1 and refers to a new generation of asynchronous I/O API. It offers batch processing and asynchronous I/O submission/completion,  reducing the pressure caused by the user-kernel boundary crossing and eliminating the need for user-kernel boundary crossing in the best case. This is done by entering the fully polled mode that enables an SQ kernel thread to poll the submission queue and to submit any requests found there\cite{Jonathan} automatically.  
+\verb|io_uring| is introduced in Linux version 
+5.1 and refers to a new generation of asynchronous 
+I/O API. It offers batch processing and asynchronous 
+I/O submission/completion,  reducing the pressure caused 
+by the user-kernel boundary-crossing and eliminating 
+it in the best case. This is done by entering the fully 
+polled mode that enables a\verb|SQ kernel thread| to poll the 
+submission queue and to submit any requests found there 
+automatically.   In detail, \verb|io_uring| has three essential 
+components in the fully polled mode. Those are submission queue, 
+completion queue, and SQ kernel thread as despite in Figure 
+~\ref{fig:IOURING}.  A user-level process needs to do three system calls 
+to map \verb|Submission Queue|, \verb|Completion Queue|, and 
+\verb|Submission Queue Entries|（SQEs）
+into user space in the preparation stage. Submission Queue, 
+Completion Queue is a ring buffer, which contains pointers to 
+\verb|SQE| in \verb|SQEs|. As for \verb|SQE|, it contains either the uncompleted or completed 
+IO request. Then the user-level process can directly put the IO request 
+into \verb|SQ|and get the completed IO request from \verb|CQ|. In kernel, 
+the \verb|SQ kernel thread| poll the \verb|SQ|, sends any requests it finds in the queue 
+to kernel handler functions, and pushes any completed request to \verb|CQ|. 
 
-In detail, IOuring has three essential components in the fully polled mode. 
-Those are submission queue, completion queue, and SQ kernel thread as despite in figure ~\ref{fig:IOURING}. 
-Before IOuring operations. User processes need to do three system call to map Submission Queue, 
-Completion Queue, and Submission Queue Entries（SQEs）into user space. Submission Queue, Completion 
-Queue is a ring buffer, which contains pointers to SQES. 
-As for SQEs, it contains either the uncompleted or completed 
-IO request. Then user process can directly put the IO request 
-into the SQ and get the completed IO request from CQ. Other dirty 
-work is finished by SQ kernel thread and kernel handler functions. 
-With the help of shared queues between user and kernel space, IOuring 
-eliminates the user kernel boundary-crossing for every Io request. 
-This has resulted in a noticeable performance improvement.
-
-However, During the IOuring setup stage, IOuring needs at least three system 
-calls(6 kernel user boundary crossing). In addition, each executed IO still 
-needs to go through multiple layers in the kernel to reach the device finally. 
-For instance, a storage-related IO must pass through at least the file system 
-layer to arrive at the appropriate device driver layer\cite{Yuhong}. 
-Hence, each IO operation still brings noticeable overhead when access new generation devices.
-
-
+With the help of shared queues between user and kernel space, 
+\verb|io_uring| eliminates the user kernel boundary-crossing for every
+ Io request. This has resulted in a noticeable performance improvement. 
+ However, during the \verb|io_uring| setup stage, \verb|io_uring| 
+ needs at least three system calls(6 context switches). In addition, each IO request still 
+ needs to go through multiple layers in the kernel to reach the device. 
+ For instance, a storage-related IO must pass through at least the file 
+ system layer to arrive at the appropriate device driver layer. Hence, 
+ each IO operation still brings noticeable overhead when access new 
+ generation devices.
 \subsection{OSbypass(DPDK)}
 \begin{figure}[tbp]
   \centering
@@ -241,121 +305,58 @@ Hence, each IO operation still brings noticeable overhead when access new genera
   \label{fig:Linux_networking}
 \end{figure}
 
-Kernel bypasses, such as DPDK(for intelligent network cards) and SPDK(for NVMe-based storage), 
-allow applications to communicate with devices without involving the kernel. For example, as shown in Figure ~\ref{fig:Linux_networking}, 
-in the context of a DPDK-driven network process, the Kernel Bypass enables applications to bypass the kernel 
-and process network packets using services on user space that implement the same functionality. In addition, 
-the device IO is mapped directly to userspace via the UIO mechanism. Therefore, the application can control 
-devices now from user space and get packets directly from NIC. It avoids multiple data copies on the network 
-path, e.g., the replication between the NIC and the kernel and the copy between the kernel and userspace. 
-In particular, kernel bypass eliminates the overhead of privileged transactions because the kernel is not 
-involved. As a result, DPDK brings high throughput and low latency packet processing to applications 
+Kernel bypasses, such as \verb|DPDK|(for intelligent network cards) and 
+\verb|SPDK|(for NVMe-based storage), allow applications to communicate 
+with devices without involving the kernel. For example, as shown 
+in Figure ~\ref{fig:Linux_networking}, in the context of a 
+DPDK-driven network process, the Kernel Bypass enables applications 
+to bypass the kernel and process network packets on user space. In addition, 
+the device registers are mapped directly to user space. 
+Therefore, the application can control devices without 
+any performance loss caused by privilege transition. 
+It avoids multiple data copies in the kernel-oriented network 
+processing, i.g., the copy between hardware and kernel and the 
+copy between kernel to user space. As a result, \verb|DPDK| brings high 
+throughput and low latency packet processing to applications 
 compared to the Linux networking stack.
 
-On the other hand, OS-bypass is less flexible and more challenging to adapt than traditional approaches. 
-It was hard to integrate with the existing OS since it has changed the operating mode of the current OS. 
-In addition, It requires an application to implement services initially provided by the kernel for processing 
-the data.   This may lead to a significant overhead for application developers.  The most painful thing is 
-that kernel bypass breaks the isolation between user space and devices provided by the kernel. This is fatal 
-in the application container scenario since the abstraction and isolation of resources are provided by the kernel. 
+On the other hand, OS-bypass is less flexible and more 
+challenging to adapt than traditional approaches. It was 
+hard to integrate with the existing OS since it has 
+changed the operating mode of the current OS. 
+In addition, It requires an application to implement its 
+package processing library since the packages passed to 
+user-land through \verb|DPDK| are raw packages. This may lead to 
+a significant overhead for application developers. 
+The most painful thing is that kernel bypass breaks 
+the isolation between a user-land application and devices
+ provided by the kernel because device registers are mapped to
+ s user space directly by \verb|DPDK|.
 
-All in all, Kernel bypass eliminates the delay caused by the kernel. 
-Still, it also has drawbacks, for example, significant application-level changes, 
-lack of isolation between drivers and applications, etc.
+All in all, Kernel bypass eliminates the performance 
+loss in the kernel networking stack. Still, it also has 
+drawbacks, such as significant application-level changes, 
+lack of isolation between devices and applications, etc.
 
 \subsection{XDP}
-XDP stands for eXpress Data Path, which is the opposite of kernel bypass technology because 
-it has been completely embedded in the kernel. As shown in Figure ~\ref{fig:Linux_networking}, it uses eBPF technology to place user-defined code(UDC) 
-at the bottom of the kernel network stack, that is, between the kernel network stack and the network card. 
-Thus, specific data packets can be processed as soon as they arrive at the kernel instead of being passed to 
-the application through the kernel. The user-defined code can decide what to do with the arriving data packets. 
-For example, discard the data packet, forward it to other network routes, send it to the kernel network, etc.
+\verb|XDP| stands for \verb|eXpress Data Path|, which is the opposite of 
+kernel bypass technology because it has been completely embedded 
+in the kernel. As shown in Figure ~\ref{fig:Linux_networking}, 
+it uses \verb|eBPF| technology to place user-defined code(UDC) at the 
+bottom of the kernel network stack, that is, between the kernel 
+network stack and the network card. 
+Data packets can be processed as soon as they arrive at the kernel 
+instead of being passed to applications. The UDC can decide how to 
+process the arriving data packets. For example, 
+discard the data packet, forward it to other network 
+routes, or send it to the kernel network stack for further processing.
 
-In summary, by embedding the code into the kernel, XDP has improved the processing efficiency of the 
-package significantly and reduced the pressure on the kernel stack. Especially XDP does not break the 
-isolation between user and kernel. Thus, it Fully ensures the safety of the device.
+In summary, by embedding the code into the kernel, 
+\verb|XDP| has significantly improved the package processing 
+efficiency and reduced package processing's pressure 
+in the kernel. Especially \verb|XDP| does not break the isolation 
+between user and kernel. Thus, it Fully ensures the safety of the device.
 
-On the other hand, this method is not flexible enough because it can only handle specific 
-packages, which means that most packages still need to be passed through the kernel to the 
-application for processing. Therefore, the performance of network communication may suffer 
-a significant loss compared to kernel bypass.
-
-\section{Motivation}
-Input and output are always an unavoidable topic for applications. 
-Normally, IO operation is performed via system call, which builds 
-a bridge between the application and the device. Device can savely 
-communicate with application through system call and the isolation 
-between device and application is secured by kernel. 
-
-How does linux handle privilege privilege transitions？ 
-On 32 bit system, the kernel used the int80 interrupt method 
-to trigger system calls. This method is slow because it is 
-not specifically designed for privilege transitions. 
-In detail, the kernel needs to figure out what to do 
-next through the interrupt descriptor table placed on 
-the memory. Memory access can sometimes be costly. 
-Therefore, on the x64 system, new instructions 
-syscall/sysret for system call entering to and return 
-from the kernel are introduced. The benefit of those 
-instructions is obvious. System calls do not need to read 
-the interrupt descriptor table placed on the memory anymore, 
-and all manipulation about privilege transitions is finished 
-within registers as it enters the kernel. As Intel explained, 
-\textquote{SYSCALL on privilege level 3  invokes an OS system-call handler at privilege level 0.  
-It does so by loading RIP from the IA32 LSTAR  MSR. Besides that SYSCALL loads the CS and SS 
-selectors with values derived from bits 47:32 of the IA32 STAR MSR, and does not save the stack pointer (RSP).}
-
-\begin{figure}[tbp]
-  \centering
-  \includegraphics[width=0.8\textwidth]{images/system_call_process}
-  \caption[Short description]{Systemc Call Process}
-  \label{fig:system_call_process}
-\end{figure}
-
-After we understand how privileges are converted, let us now look at the process of a 
-system call. As can see in figure ~\ref{fig:system_call_process}, a system call is invoked in most cases by going 
-through a wrapper function (Step 1) in the C standard library. After the wrapper function 
-traps the kernel into kernel mode via SYSCALL, the CPU jumps to the OS system-call handler 
-function to continue executing(step 2). In this function, user stack and page-table are 
-replaced by kernel stack and page table, respectively; the corresponding system call 
-parameters are retrieved from proper registers, the value of all registers is saved 
-on the kernel stack for construction of $struct pt_regs$ as some system calls like fork() 
-need to have all registers on the stack. Finally, the OS system call handler (step3) calls 
-the specific kernel service, and the result is returned to the user program in reverse order(step4-6).
-
-Why is the system call process a performance issue? Compared to the function call, 
-the caller and callee are in the same userspace. Almost every system call needs two 
-context switches every time. 
-This means that the context belonging to a running process needs to be saved to 
-memory,  then replaced by the kernel's context. The more serious problem comes from 
-cache miss, such as cache miss in TLB. TLB stands for Translation Lookaside Buffer 
-that contains the virtual address to physical address mapping most likely to be 
-accessed currently. Cache misses in the TLB can cause page faults, leading to 
-significant performance penalties since the operating system will try to transfer 
-the relevant page from the hard disk into the memory if the operating system 
-determines that the page fault is valid. In addition, OS needs to do various 
-checks during the privilege transition. All of those need time.
-
-Nowadays as new hardware such as NVMe-based SSDs or RDMA network 
-cards is put into use, The performance improvement of device is 
-extremely obvious, e.g, the access delay is only a few microseconds, 
-and the bandwidth can reach gigabytes per second.\cite{Yuhong}. 
-Experiments show that when using a new generation of intelligent 
-hardware, half of the overhead of one IO operation comes from the 
-kernel software \cite{Yuhong}, because each IO operation requires 
-two context switches, multiple copy operations between the device 
-and user space, and may suffer multiple cache miss. Hence,  
-the software is becoming a bottleneck of performance for IO operations.
-
-In summary, five things that may lead to performance loss as system call enter or exit the kernel:
-
-\begin{itemize}
-  \item CPU context switch.
-  \item The stack is switched from the user mode to the kernel mode, and the relevant information is stored in the kernel stack.
-  \item User/kernel page table switch, and retrieve some pages needed by the kernel from Disk.
-  \item Data caches and TLB invalidation after privilege transition caused by different run time environments between kernel and userspace.
-   \item Multiple copy operations required between user and device through kernel.
-\end{itemize}
 \cleardoublepage
 
 %%% Local Variables:
