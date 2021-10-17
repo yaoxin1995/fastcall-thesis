@@ -145,7 +145,7 @@ executes an instruction that reads a secret. Finally, the attacker can get the s
 by timing the cache(flush and reload\cite{11}).
 
 Now let us view a code snippet from MIT 6.828\cite{1}, which shows how meltdown works. Note here we assume that the user space and the 
-kernel space share one page-table. 
+kernel space share one page-table and the goal is obtaining a 64 bit secret stored in the kernel space from the user space. 
 \begin{lstlisting}[style=CStyle]
   char buf[8192]
 
@@ -177,17 +177,18 @@ In this code snippet, an attacker exploits the out-of-order execution and
 microarchitecture side channel to read the secret out of kernel memory. 
 The attacker first allocates a buffer with 8192 bytes. Then the attacker uses 
 \emph{clflush} to clear any records related to \emph{buf[0]} and \emph{buf[4096]} in the cache. 
-Next, we let the CPU execute a costly instruction that may take more than 1000 cycles. 
+Next, the attacker lets the CPU execute a costly instruction that may take more than 1000 cycles. 
 In order to prevent any performance loss, instead of waiting for the completion of the instruction,  
 the CPU(multi-cores) speculatively execute the following instructions(line 11-13). 
 Because those instructions are executed out of order, the CPU chooses to run them and does 
 not care whether the current process has permission to access this kernel memory. 
-After the CPU completes the CPU in line 13, the CPU decides to reorder all speculatively 
+After the CPU completes the instruction in line 13, the CPU decides to reorder all speculatively 
 executed instructions and retires them one by one. At this point, the CPU finally 
 realizes that the current process does not have permission to access kernel memory 
-according to PTE\_U (the page table entry user bit), then reverts the state of itself. 
+according to PTE\_U (the page table entry user bit), then it reverts the state of itself. 
 However, the result of the instruction \emph{r3 = buf[r2]} has already been cached. Therefore, 
 the attacker can guess the first bit of the kernel address through cache timing\cite{11}. 
+By repeating the above process 64 times, the attacker can successfully guess the 64-bit secret.
 
 Since the meltdown is a hardware-based vulnerability, it is hard to prevent the attacker 
 from exploiting it. One intermediate solution is KPTI\cite{2}, which separates the original page 
@@ -352,7 +353,7 @@ routes, or send it to the kernel network stack for further processing.
 In summary, by embedding the code into the kernel, 
 \emph{XDP} has significantly improved the package processing 
 efficiency and reduced package processing's pressure 
-in the kernel. Especially \emph{XDP} does not break the isolation 
+of the kernel networking stack. Especially \emph{XDP} does not break the isolation 
 between user and kernel. Thus, it Fully ensures the safety of the device.
 
 \cleardoublepage

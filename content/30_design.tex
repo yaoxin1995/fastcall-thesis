@@ -38,10 +38,9 @@ between applications and devices.
 \end{figure}
 
 \section{Kernel Offloading}
-Figure ~\ref{fig:system_call_path_design_3} shows that the application must enter the kernel 
-to interact with devices with the help of system calls. 
-Due to security issues, OS exploits ring protection to isolate 
-applications and devices since applications are not trustworthy. 
+Figure ~\ref{fig:system_call_path_design_3} shows that an application must employ system calls to enter the kernel in order to manipulate devices.
+Due to security issues, OS uses the ring protection mechanisms\cite{13} to isolate untrusted
+applications and devices. 
 With the continuous improvement of IO performance requirements 
 from applications in recent years, this mechanism is becoming outdated. 
 The main reason comes from the kernel and its side effect. Specifically, 
@@ -50,15 +49,14 @@ variant network protocols instead of high-performance communication.
 In addition, the privilege transitions between the user space and kernel 
 is very costly. Therefore, the speed of IO paths through the kernel is slow.
 
-How to address this issue? The most straightforward 
-answer is kernel bypass. Kernel bypass allows applications to directly 
+The most straightforward 
+solution is kernel bypass. Kernel bypass allows applications to directly 
 communicate with devices by mapping the device registers into user space. 
 Hint, severe performance penalty caused by the kernel is dropped. 
 The application could manipulate device registers similar to accessing memory. 
 In addition, through configuring device registers, data can be 
 transferred directly between application and device using \verb|DMA|, 
-instead of copying it multiple times, i.e., NIC to the kernel, 
-the kernel to user land applications.
+instead of copying it multiple times (NIC to the kernel, the kernel to user land applications).
 
 In summary, Mapping devices to user space has two advantages. 
 The first is that the performance is increased dramatically 
@@ -71,7 +69,7 @@ in our fast call mechanism too
 
 
 
-Directly mapping device registers to user space 
+Directly mapping device registers on the user space 
 is faster for communication between applications 
 and devices. However, it could be a disaster in terms 
 of security. Imagine that if an attacker knows where device
@@ -110,13 +108,13 @@ executable stub and user space mapped device registers.
 By doing so, we could isolate devices from an untrustworthy 
 application successfully. 
 
-As we analyzed before, an application exploits the 
-\verb|SYSCALL| instruction to invoke a system call. 
+As we analyzed before, an application employs the 
+\emph{SYSCALL} instruction to invoke a system call. 
 Compared with the system call, after an application has 
-registered a fast call through IOCTL, it can directly call 
-the fast call through the function pointer. We will discuss 
+registered a fast call through \emph{IOCTL}, it can directly call 
+the fast call through a function pointer. We will discuss 
 in detail the fast call's registration process in the following 
-chapters. For now, you only need to know that fast call infrastructure 
+chapters. For now, you only need to know that fast call infrastructure in the kernel 
 returns the stub address to the application after a fast 
 call registration is complete.  The application can use a 
 function pointer to the stub to invoke the fast call. Thus, 
@@ -143,19 +141,18 @@ and executable memory region. On the other hand, we need the
 memory region of the stub only executable to prevent an attacker 
 from reading secrets(devices' location) stored on the stub. 
 How to solve this conflict? The answer is simple: separate the 
-stub into two parts, i.g., the fast call entry and the secret regions. 
+stub into two parts, i.e., the fast call entry and the secret regions. 
 As shown in the figure  ~\ref{fig:Stub_partition}, the fast 
 call entry region contains the code predefined how to manipulate 
 the device registers, and this region is executable and readable. 
-The fast call second region contains the secrets(location of device 
-registers on user space) and is an executable memory region. 
+The fast call secret region contains the secrets(location of device 
+registers on user space) and is an only executable memory region. 
 Note that the fast call entry region does not know the secrets, 
 which means that the entry region needs to retrieve the secrets 
 from the secret region if it wants to manipulate the device registers.
-Finally, remember previously, a fast call is invoked by a function 
-pointer to the stub in the fast call?  Due to the stub being divided 
-into the fast call entry and secret region, a fast call needs to be 
-invoked by the function pointer to the fast call entry region.
+Therefore, after the fast call registration process is completed, the 
+in-kernel fast call infrastructure returns the address of the fast call entry 
+region. The Application can then use a function pointer to this region to invoke the fast call.
 \section{Overview}
 \begin{figure}[tbp]
   \centering
@@ -167,49 +164,51 @@ invoked by the function pointer to the fast call entry region.
 
 
 So far, we have learned multiple design decisions of the fast call. 
-Now let us take a look at the overview of the fast call. Generally, 
-a fast call is running in the user space(non-privileged level) and is 
+Now let us take a look at its overview. Generally, 
+a fast call is running on the user space(non-privileged level) and is 
 composed of 3 parts, i.e., the entry region, the secret region, and the 
 device registers mapped to user space. 	In the following discussion, 
 we name the device registers mapped to the user space as hidden regions.
 
 Figure ~\ref{fig:fastcall_architecture} illustrates the 
-architecture of the fast system call mechanism in the current 
+workflow of a fast system call in the current 
 version. The core of each fast call is composed of 3 different 
 memory regions. They are the fast call entry, secret, and hidden region. 
 In order to distinguish between system calls and fast calls, these two 
 mechanisms have different calling methods. Compared to the system call, 
-an application uses a function pointer to the entry region returned by 
-the fast call registration function to call the fast call. Because all 
+an application uses a function pointer to the entry region to call the fast call. Because all 
 the components of a fast call run in the user space, the application can 
-use fast calls like a typical function call and avoid performance 
+invoke fast calls like typical function calls and avoid performance 
 loss in system calls.
 
-The fast call entry region is the core of a fast call. 
-It is a memory area that is readable and executable and 
-contains the code for the fast call. The code on this 
-region assumes the responsibility of the service function 
-in the system call mechanism. It completes all predefined 
-operations on device registers in hidden regions and returns 
-the result to an application. Specifically, this code verifies 
-the parameters passed in by the application, retrieves secrets 
-from the secret region, and manipulates devices. 
+The fast call entry region is the core of a fast call. It is a memory area that is readable and 
+executable and contains the code for the fast call. The code on this region assumes the responsibility 
+of the service routine in the system call mechanism. It completes all predefined operations on device 
+registers in hidden regions and returns the result to an application. Specifically, after an application 
+invoked the fast call, the code first verifies the parameters passed in by the application, then it jumps 
+to the secret region, retrieves secrets, and jumps back.  Next, the code finds the location of hidden 
+regions according to the secrets and manipulates device registers mapped on hidden regions. 
 
 The secret region contains addresses of the hidden region as secrets. 
-The secret region's unique feature is that it is only an executable memory 
-area in user space. Thus, any attempt to read the content in this region 
-will cause an exception. In this way, we protected the secrets in this 
-region from attackers.
+The secret region's unique feature is that it is an only executable memory area on userspace. 
+Thus, any attempt to read the content in this region would cause an exception. In this way, 
+we protected the secrets in this region from attackers.  Note that when a fast call is invoked, 
+the code on the entry region must first get the secret from this region. Because the entry region does 
+not know the location of hidden regions.  In particular,  this region contains multiple secrets because
+ a device can have more than one device register. The fast call mechanism supports mapping each register 
+ to a different hidden region. Therefore, a secret is written into this region after creating the 
+ corresponding hidden region during the fast call registration process.
 
-The hidden region is the device registers mapped on user space. 
-A fast call could directly manipulate a device through this region 
-without the privilege transition. Note that a fast call may have 
-multiple hidden regions since a device may have multiple registers 
-and fast call support map those register into different places. 
-To protect this region from attack, we randomize fast call's 
-each hidden region during the fast call registration process. 
-Thus, there is a high chance that the fast call entry region 
-can access hidden regions.
+A hidden region is the device registers mapped on user space. 
+A fast call could directly manipulate a device through this region without 
+the privilege transition. Note that a fast call may have multiple hidden 
+regions since a device may have multiple registers. Fast call mechanisms 
+support mapping each register into a different hidden region. In addition,
+we randomize each hidden region's location during the fast call registration 
+process to protect this region from attack.  In particular, we can't pre-write 
+the location of a hidden region to the secret region. The reason is that each hidden 
+region's location is randomized by the in-kernel fast call mechanisms during the creation 
+of each hidden region. In other words,  the location is only known after the hidden region is created. 
 
 In short, we introduced a new communication mechanism between 
 application and device to increase the IO performance. 
