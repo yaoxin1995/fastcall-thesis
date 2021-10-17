@@ -13,71 +13,71 @@
 % als 10 Seiten liest keiner.
 
 
-\section{A Section}
+% \section{A Section}
 
-Referencing other chapters: \ref{sec:state} \ref{sec:design}
-\ref{sec:implementation} \ref{sec:evaluation} \ref{sec:futurework}
-\ref{sec:conclusion}
+% Referencing other chapters: \ref{sec:state} \ref{sec:design}
+% \ref{sec:implementation} \ref{sec:evaluation} \ref{sec:futurework}
+% \ref{sec:conclusion}
 
-\begin{table}[htp]
-  \centering
-  \begin{tabular}{lrr}
-    \textbf{Name} & \textbf{Y} & \textbf{Z} \\
-    \hline
-    \textit{Foo} & 20,614 & \unit[23]{\%} \\
-    \textit{Bar} & 9,914 & \unit[11]{\%} \\
-    \textit{Foo + Bar} & 30,528 & \unit[34]{\%} \\
-    \hline
-    \textit{total} & 88,215 & \unit[100]{\%} \\
+% \begin{table}[htp]
+%   \centering
+%   \begin{tabular}{lrr}
+%     \textbf{Name} & \textbf{Y} & \textbf{Z} \\
+%     \hline
+%     \textit{Foo} & 20,614 & \unit[23]{\%} \\
+%     \textit{Bar} & 9,914 & \unit[11]{\%} \\
+%     \textit{Foo + Bar} & 30,528 & \unit[34]{\%} \\
+%     \hline
+%     \textit{total} & 88,215 & \unit[100]{\%} \\
 
-  \end{tabular}
-  \caption[Some interesting numbers]{Various very important looking numbers and sums.}
-  \label{tab:numbers}
-\end{table}
+%   \end{tabular}
+%   \caption[Some interesting numbers]{Various very important looking numbers and sums.}
+%   \label{tab:numbers}
+% \end{table}
 
-More text referencing Table~\ref{tab:numbers}.
+% More text referencing Table~\ref{tab:numbers}.
 
-\section{Another Section}
+% \section{Another Section}
 
-\begin{figure}[tbp]
-  \centering
-  \includegraphics[width=0.8\textwidth]{images/squirrel}
-  \caption[Short description]{A long description of this squirrel figure.
-  Image taken from
-  \url{http://commons.wikimedia.org/wiki/File:Sciurus-vulgaris_hernandeangelis_stockholm_2008-06-04.jpg}}
-  \label{fig:squirrel}
-\end{figure}
+% \begin{figure}[tbp]
+%   \centering
+%   \includegraphics[width=0.8\textwidth]{images/squirrel}
+%   \caption[Short description]{A long description of this squirrel figure.
+%   Image taken from
+%   \url{http://commons.wikimedia.org/wiki/File:Sciurus-vulgaris_hernandeangelis_stockholm_2008-06-04.jpg}}
+%   \label{fig:squirrel}
+% \end{figure}
 
-Citing \cite{bellard2005qfa} other documents \cite{bellard2005qfa, boileau06}
-and Figure~\ref{fig:squirrel}.
+% Citing \cite{bellard2005qfa} other documents \cite{bellard2005qfa, boileau06}
+% and Figure~\ref{fig:squirrel}.
 
-Something with umlauts and a year/month date:
-\cite{becher04:_feurig_hacken_mit_firew}.
+% Something with umlauts and a year/month date:
+% \cite{becher04:_feurig_hacken_mit_firew}.
 
-And some online resources: \cite{green04}, \cite{patent:4819234}
+% And some online resources: \cite{green04}, \cite{patent:4819234}
 
-\section{Yet Another Section}
+% \section{Yet Another Section}
 
-\todo{add content}
+% \todo{add content}
 
-\begin{figure}[tbp]
- \missingfigure{Come up with a mindblowing figure.}
- \caption{A mindblowing figure}
- \label{fig:todo}
-\end{figure}
+% \begin{figure}[tbp]
+%  \missingfigure{Come up with a mindblowing figure.}
+%  \caption{A mindblowing figure}
+%  \label{fig:todo}
+% \end{figure}
 
-\section{Test commands}
+% \section{Test commands}
 
-\drops \LLinux \NOVA \QEMU
-\texttt{memcpy}
-A sentence about BASIC. And a correctly formatted one about ECC\@.
+% \drops \LLinux \NOVA \QEMU
+% \texttt{memcpy}
+% A sentence about BASIC. And a correctly formatted one about ECC\@.
 
 
 
 With the popularization of new generation hardware on the network and storage, the processing speed 
-of data packets on the hardware is getting faster and faster. For example, the bandwidth of the smart
+of data packets on the hardware is getting faster and faster\cite{12}. For example, the bandwidth of the smart
 network card has reached an astonishing 100Gb/s. Under this circumstance, the traditional perception
- that the packet processing speed on hardware is lower than the packet processing speed in software is overturned, i.e.,
+ that the packet processing speed on hardware is lower than the packet processing speed in software is overturned\cite{Ousterhout1990WhyAO}, i.e.,
 The software has become a performance bottleneck in data transmission.
 The reason is obvious. Compared with the continuous upgrading of hardware, 
 the communication between the application and the device still relies on the kernel IO stack. 
@@ -133,7 +133,7 @@ enter or exit the kernel:
 
 Many solutions have been proposed to address the performance losses caused 
 by privilege transition and its side effect. The most straightforward and 
-effective solution is OS-bypass, e.g., DPDK. DPDK allows a performance-critical 
+effective solution is OS-bypass, e.g., DPDK\cite{7}. DPDK allows a performance-critical 
 user-land application to directly communicate with the smart NIC. It maps the 
 device registers directly into user space. Therefore, the application can manipulate
  the device and send/receive data packages without multiple copies, i.e., copy between the application and kernel, 
@@ -168,7 +168,7 @@ through a fast path provided by the fast call mechanisms. In addition, the fast 
  with devices looks like invoking a function call.
 
 However, the fast call mechanism is fragile since device registers and fast paths reside on user land. 
-An attacker may use \emph{Meltdown} or \emph{Spectre} vulnerability to damage the isolation between the device registers 
+An attacker may use \emph{Meltdown}\cite{1} or \emph{Spectre}\cite{3} vulnerability to damage the isolation between the device registers 
 and applications guaranteed by the fast paths. Because the vulnerabilities come from the hardware, it is 
 necessary to change the CPU design to mitigate the security issue caused by those attack models. In the 
 following chapters, we introduce the fast call mechanism step by step. At the end of this paper, we 

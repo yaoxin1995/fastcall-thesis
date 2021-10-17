@@ -56,7 +56,7 @@ An application can't access devices directly because device memory typically res
 
 
 
- Most operating systems employ the protection ring mechanism to isolate user-kernel land. 
+ Most operating systems employ the protection ring mechanism\cite{13} to isolate user-kernel land. 
  Figure ~\ref{fig:ring_protection} provides a sketch of this mechanism. Typically, it has multiple different privilege levels, 
  ring0 to ring n. While ring 0 is the most privileged level, ring n is the least privileged
  Note that this mechanism is enforced by hardware, i.e., the CPU provides different running modes 
@@ -85,7 +85,7 @@ An application can't access devices directly because device memory typically res
  It involves multiple times saving and restoring of registers, CPU mode switch(user to privilege mode), 
  permission checking, etc. Thus, the privilege transition is very costly.
 
- Now, let us take a look at the system call's workflow. From it, you can be aware of 
+ Now, let us take a look at the system call's workflow\cite{8}. From it, you can be aware of 
  how complex and expensive the privilege transition can be.
  \begin{enumerate}
   \item User-land processes employ a wrapper function provided by the c library to invoke system calls.
@@ -122,7 +122,7 @@ An application can't access devices directly because device memory typically res
  
 \subsection{\emph{Meltdown} attack}
 
-The CPU side-channel attacks such as \emph{meltdown} and \emph{spectre} are mainly based on 
+The CPU side-channel attacks such as \emph{meltdown}\cite{3} and \emph{spectre}\cite{4} are mainly based on 
 CPU speculative execution and microarchitecture side channel such as caches. 
 In general, accessing memory and some other operations can be expensive. 
 In order to prevent the CPU from busy waiting(Pipeline stalling), 
@@ -142,9 +142,10 @@ the record in the cache is not cleared if memory access-related instruction
 fails because of the page table permission check. Thus, an attacker can employ 
 \emph{clflush} instruction to flush the cache in advance then lets the CPU speculatively 
 executes an instruction that reads a secret. Finally, the attacker can get the secret 
-by timing the cache(flush and reload).
+by timing the cache(flush and reload\cite{11}).
 
-Now let us view a code snippet from MIT 6.828\cite{1}, which shows how meltdown works. 
+Now let us view a code snippet from MIT 6.828\cite{1}, which shows how meltdown works. Note here we assume that the user space and the 
+kernel space share one page-table. 
 \begin{lstlisting}[style=CStyle]
   char buf[8192]
 
@@ -186,11 +187,11 @@ executed instructions and retires them one by one. At this point, the CPU finall
 realizes that the current process does not have permission to access kernel memory 
 according to PTE\_U (the page table entry user bit), then reverts the state of itself. 
 However, the result of the instruction \emph{r3 = buf[r2]} has already been cached. Therefore, 
-the attacker can guess the first bit of the kernel address through cache timing. 
+the attacker can guess the first bit of the kernel address through cache timing\cite{11}. 
 
 Since the meltdown is a hardware-based vulnerability, it is hard to prevent the attacker 
 from exploiting it. One intermediate solution is KPTI\cite{2}, which separates the original page 
-table into two page tables, i.e., user and kernel page table.  While the kernel page table 
+table into two page-tables, i.e., user and kernel page table.  While the kernel page table 
 contains all sensitive data, each user page table only includes the data belonging to one process. 
 In this case, the instruction(line 10) in the above code snippet would cause a segfault if 
 a process tries to run the code on its user space. Because the user page table does not contain 
@@ -201,12 +202,10 @@ since the page table must be switched back and forth.
 
 \subsection{\emph{Spectre} attack}
 
-\emph{Spectre} is similar to meltdown vulnerability. It also bases on speculative 
+\emph{Spectre}\cite{4} is similar to meltdown vulnerability. It also bases on speculative 
 execution and microarchitecture side channel such as caches. However, unlike meltdown the 
 \emph{Spectre} attack manipulates a unit in the CPU called branch predictor to execute some wrong 
-code that can steal secrets.  The branch predictor can generally be used in 3 places:
-
-
+code that can steal secrets.  The branch predictor can generally be used in 3 places\cite{5}:
 
 
 
@@ -222,17 +221,17 @@ the predictor by executing some branches intentionally.  In this case, many wron
 are written into the branch predictor. Then the attacker executes a carefully selected branch. 
 Due to the branch predictor mistraining, the predictor may choose the wrong branch to do 
 speculative execution.  In the wrong branch, secrets can be read out of memory and cached. 
-Later, the attacker can get the secrets through cache timing.
+Later, the attacker can get the secrets through cache timing\cite{11}.
 
 In the second method, 
-because the branch predictor is shared by all processes running on the same CPU, 
+because the branch predictor is shared by all processes running on the same core, 
 a malicious process can write wrong samples into the predictor so that the victim process will 
 jump to a carefully selected code snippet(the gadget) through a wrong branch prediction. 
 After the execution of the gadget, secrets can be cached into the cache. Later, the attacker 
 can get the secrets through cache timing.
 
 \section{Related work}
-The IO refers to data transformation between user-level processes 
+The IO stands for data transformation between user-level processes 
 and various devices. A complete IO is usually divided into 2 phases:
 \begin{itemize}
   \item Privilege transitions between user space and kernel space.
@@ -244,94 +243,93 @@ To address this issue, clever developers proposed many approaches.
 This section will cover some of them, which aim to alleviate the IO 
 performance bottleneck caused by the kernel.
 
-\subsection{VDSO}
+\subsection{vDSO}
 
-Let us first look at \verb|vDSO|. \verb|vDSO| stands for Virtual Dynamic Shared Object, 
+Let us first look at \emph{vDSO}\cite{9}. \emph{vDSO} stands for Virtual Dynamic Shared Object, 
 which accelerates some read-only system calls by mapping pages containing 
 relevant information and codes to user space. In particular, the pages are 
 mapped both to user and kernel space. While the page in the kernel is writable, 
 the mapping containing the page in user space is read-only, 
 and the mapping address is randomized against the attacker.  
-\verb|vDSO| improves IO performance, but it also has obvious limitations. 
-That is, all codes and data related to \verb|vDSO| in the user space are read-only. 
+\emph{vDSO} improves IO performance, but it also has obvious limitations. 
+That is, all codes and data related to \emph{vDSO} in the user space are read-only. 
 If the program wants to transfer data to the device, it can only enter the 
-kernel or try other methods. Therefore, \verb|vDSO| is still regarded as an 
+kernel or try other methods. Therefore, \emph{vDSO} is still regarded as an 
 IO slow path in the context of the communication  between the application 
 and the device,
-\subsection{IOURING}
+\subsection{io\_uring}
 \begin{figure}[tbp]
   \centering
   \includegraphics[width=0.8\textwidth]{images/IOURING}
-  \caption[Short description]{IOURING}
+  \caption[io\_uring]{io\_uring}
   \label{fig:IOURING}
 \end{figure}
-\verb|io_uring| is introduced in Linux version 
+
+\emph{io\_uring}\cite{10} is introduced in Linux version 
 5.1 and refers to a new generation of asynchronous 
 I/O API. It offers batch processing and asynchronous 
 I/O submission/completion,  reducing the pressure caused 
 by the user-kernel boundary-crossing and eliminating 
 it in the best case. This is done by entering the fully 
-polled mode that enables a\verb|SQ kernel thread| to poll the 
+polled mode that enables a \emph{SQ kernel thread} to poll the 
 submission queue and to submit any requests found there 
-automatically.   In detail, \verb|io_uring| has three essential 
-components in the fully polled mode. Those are submission queue, 
-completion queue, and SQ kernel thread as despite in Figure 
+automatically. In detail, \emph{io\_uring} has three essential 
+components in the fully polled mode. Those are \emph{submission queue}, 
+\emph{completion queue}, and \emph{SQ kernel thread} as despite in Figure 
 ~\ref{fig:IOURING}.  A user-level process needs to do three system calls 
-to map \verb|Submission Queue|, \verb|Completion Queue|, and 
-\verb|Submission Queue Entries|（SQEs）
-into user space in the preparation stage. Submission Queue, 
+to map \emph{Submission Queue}, \emph{Completion Queue}, and 
+\emph{Submission Queue Entries} ( SQEs ) into user space in the preparation stage. Submission Queue, 
 Completion Queue is a ring buffer, which contains pointers to 
-\verb|SQE| in \verb|SQEs|. As for \verb|SQE|, it contains either the uncompleted or completed 
+\emph{SQE} in \emph{SQEs}. As for \emph{SQE}, it contains either the uncompleted or completed 
 IO request. Then the user-level process can directly put the IO request 
-into \verb|SQ|and get the completed IO request from \verb|CQ|. In kernel, 
-the \verb|SQ kernel thread| poll the \verb|SQ|, sends any requests it finds in the queue 
-to kernel handler functions, and pushes any completed request to \verb|CQ|. 
+into \emph{SQ}and get the completed IO request from \emph{CQ}. In kernel, 
+the \emph{SQ kernel thread} poll the \emph{SQ}, sends any requests it finds in the queue 
+to kernel handler functions, and pushes any completed request to \emph{CQ}. 
 
 With the help of shared queues between user and kernel space, 
-\verb|io_uring| eliminates the user kernel boundary-crossing for every
- Io request. This has resulted in a noticeable performance improvement. 
- However, during the \verb|io_uring| setup stage, \verb|io_uring| 
+\emph{io\_uring} eliminates the user kernel boundary-crossing for every
+ IO request. This has resulted in a noticeable performance improvement. 
+ However, during the \emph{io\_uring} setup stage, \emph{io\_uring} 
  needs at least three system calls(6 context switches). In addition, each IO request still 
  needs to go through multiple layers in the kernel to reach the device. 
  For instance, a storage-related IO must pass through at least the file 
  system layer to arrive at the appropriate device driver layer. Hence, 
- each IO operation still brings noticeable overhead when access new 
- generation devices.
-\subsection{OSbypass(DPDK)}
+ each IO operation still brings noticeable overhead.
+\subsection{OS-bypass}
 \begin{figure}[tbp]
   \centering
   \includegraphics[width=0.8\textwidth]{images/Linux_networking}
-  \caption[Short description]{Linux Networking}
+  \caption[Linux Networking]{Linux Networking}
   \label{fig:Linux_networking}
 \end{figure}
 
-Kernel bypasses, such as \verb|DPDK|(for intelligent network cards) and 
-\verb|SPDK|(for NVMe-based storage), allow applications to communicate 
+
+
+Kernel bypass, such as \emph{DPDK}\cite{7} (for intelligent network cards), allows applications to communicate 
 with devices without involving the kernel. For example, as shown 
 in Figure ~\ref{fig:Linux_networking}, in the context of a 
-DPDK-driven network process, the Kernel Bypass enables applications 
+DPDK-driven network process, the Kernel Bypass allows applications 
 to bypass the kernel and process network packets on user space. In addition, 
 the device registers are mapped directly to user space. 
 Therefore, the application can control devices without 
 any performance loss caused by privilege transition. 
 It avoids multiple data copies in the kernel-oriented network 
 processing, i.g., the copy between hardware and kernel and the 
-copy between kernel to user space. As a result, \verb|DPDK| brings high 
+copy between kernel to user space. As a result, \emph{DPDK} brings high 
 throughput and low latency packet processing to applications 
 compared to the Linux networking stack.
 
-On the other hand, OS-bypass is less flexible and more 
-challenging to adapt than traditional approaches. It was 
+On the other hand, OS-bypass is less flexible to adapt than traditional approaches. It was 
 hard to integrate with the existing OS since it has 
 changed the operating mode of the current OS. 
 In addition, It requires an application to implement its 
 package processing library since the packages passed to 
-user-land through \verb|DPDK| are raw packages. This may lead to 
+user-land through \emph{DPDK} are raw packages. This may lead to 
 a significant overhead for application developers. 
 The most painful thing is that kernel bypass breaks 
 the isolation between a user-land application and devices
  provided by the kernel because device registers are mapped to
- s user space directly by \verb|DPDK|.
+ s user space directly by \emph{DPDK}.
 
 All in all, Kernel bypass eliminates the performance 
 loss in the kernel networking stack. Still, it also has 
@@ -339,10 +337,10 @@ drawbacks, such as significant application-level changes,
 lack of isolation between devices and applications, etc.
 
 \subsection{XDP}
-\verb|XDP| stands for \verb|eXpress Data Path|, which is the opposite of 
+\emph{XDP}\cite{10.1145/3281411.3281443} stands for \emph{eXpress Data Path}, which is the opposite of 
 kernel bypass technology because it has been completely embedded 
 in the kernel. As shown in Figure ~\ref{fig:Linux_networking}, 
-it uses \verb|eBPF| technology to place user-defined code(UDC) at the 
+it uses \emph{eBPF} technology to place user-defined code(UDC) at the 
 bottom of the kernel network stack, that is, between the kernel 
 network stack and the network card. 
 Data packets can be processed as soon as they arrive at the kernel 
@@ -352,9 +350,9 @@ discard the data packet, forward it to other network
 routes, or send it to the kernel network stack for further processing.
 
 In summary, by embedding the code into the kernel, 
-\verb|XDP| has significantly improved the package processing 
+\emph{XDP} has significantly improved the package processing 
 efficiency and reduced package processing's pressure 
-in the kernel. Especially \verb|XDP| does not break the isolation 
+in the kernel. Especially \emph{XDP} does not break the isolation 
 between user and kernel. Thus, it Fully ensures the safety of the device.
 
 \cleardoublepage
