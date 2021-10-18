@@ -350,6 +350,24 @@ the fast call deregistration function cannot find the corresponding record in th
 
 \subsection{Is only executable memory region really possible?}
 
+Remember that we set the fast call secret region's VMA with the flag \emph{VM\_EXEC} 
+since we expect the VMA  to be only executable. But it is not the case. The \emph{VMA} 
+with flag \emph{VM\_EXEC} is readable and executable. The reason is that the current X86 architecture does not support none readable memory region, in other words, the only executable region.  
+Internally, according to the page table, the \emph{MMU} manages the mapping between the virtual address and the physical address in page granularity. In addition, the MMU also handles the memory 
+protection based on the permission bit on the page table entry. For example, the \emph{MMU} sends a segmentation fault to a process if the process tries to write something to an only readable memory area. 
+Each page table entry on x86 architecture has three important permission bits:
+
+\begin{itemize}
+  \item \emph{PTE\_U}:  a user-level process can not access the page if \emph{PTE\_U} = 0. 
+  \item \emph{PTE\_R}:  \emph{PTE\_R} = 0 stands  for read-only, \emph{PTE\_R} = 1 stands for read-write.
+  \item \emph{PTE\_XD}: \emph{PTE\_XD}= 0 stands for executable, \emph{PTE\_XD}= 1 stands for non-executable.
+\end{itemize}
+
+When the kernel creates a \emph{VMA} with certain flags such as \emph{VM\_EXEC} and \emph{VM\_READ} in a process address space,  it also sets the permission bits on certain page 
+table entries corresponding to the pages mapped into the \emph{VMA} so that the \emph{MMU} can manage the memory access permission correctly. In our case, we assign the secret region's \emph{VMA} the flag 
+\emph{VM\_EXEC}. Since x86 architecture dose does not have a special permission bit for none readable permission, the kernel only sets the \emph{PTE\_R = 0} and \emph{PTE\_XD = 0}, which means the pages mapped to the secret region are readable and executable.  
+Therefore, it is not possible to have an only executable memory region on x86 architecture.
+
 
 \section{Fast call entry/hidden region randomization}
 
