@@ -31,7 +31,7 @@ DOC_IMG_PNG  = images/Stub_partition.pdf
 DOC_IMG_PNG  = images/registeration_process.pdf
 DOC_IMG_PNG  = images/fastcall_workflow.pdf
 DOC_IMG_PNG  = images/fastcall_table.pdf
-DOC_IMG_PNG  = images/Fast_Call_entries.pdf
+DOC_IMG_PNG  = images/Fast_Call entries.pdf
 DOC_IMG_PNG  = images/mmap_search_methods.pdf
 DOC_IMG_PNG  = images/secret_pages.pdf
 DOC_IMG_PNG  = images/secret_pages_2.pdf
@@ -45,6 +45,7 @@ DOC_IMG_PNG  = images/sequence_file.pdf
 
 DOC_IMG_PNG  = images/fast_call_design_idea1.pdf
 DOC_IMG_PNG  = images/ring_protection.pdf
+
 
 
 # latex stuff
