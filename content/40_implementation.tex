@@ -845,7 +845,7 @@ sends to the process when the segmentation fault occurs
 in the upper half of the address space. Specifically, 
 when a process accesses an unallocated memory address 
 in the upper half of the address space, the kernel page 
-fault handler will send \emph{SIGKILL} to the process instead 
+fault handler will send \emph{SIGKILL}\cite{21} to the process instead 
 of \emph{SIGSEGV}. The advantage of \emph{SIGKILL} is that the process 
 cannot change its action when receiving the signal, which means 
 that the process has no choice but to kill itself 
@@ -912,7 +912,7 @@ of the file changes as well. In the kernel, the file supports four operations,
 namely, opening the file (\emph{open}), reading the content of the file (\emph{read}), 
 changing the starting position of reading the file (\emph{llseek}), and 
 closing the file (\emph{release}).  Internally, these four operations 
-encapsulate a sequence file and call the corresponding function in a sequence file.
+encapsulate a sequence file\cite{24} and call the corresponding function in the sequence file.
 The sequence file completes \emph{VAM's} traversal in the process address space 
 through the \emph{VMA list}. For example, the open operation 
 creates a sequence file in the kernel, and the read operation uses the 
