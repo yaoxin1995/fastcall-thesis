@@ -184,8 +184,12 @@ Because those instructions are executed out of order, the CPU chooses to run the
 not care whether the current process has permission to access this kernel memory. 
 After the CPU completes the instruction in line 13, the CPU decides to reorder all speculatively 
 executed instructions and retires them one by one. At this point, the CPU finally 
-realizes that the current process does not have permission to access kernel memory 
-according to PTE\_U (the page table entry user bit), then it reverts the state of itself. 
+realizes that the current process does not have permission to access kernel memory, then it reverts the state of itself.
+Note here that the CPU leverages the permission bit on page table entry to judge whether 
+it can access the data. Specifically, for the judgment, the CPU compares its running 
+mode(user or privilege) with the permission bit PTE\_U on the page table entry. 
+If the CPU running mode and the permission bit are inconsistent, the CPU would revert 
+its state and clear all registers.
 However, the result of the instruction \emph{r3 = buf[r2]} has already been cached. Therefore, 
 the attacker can guess the first bit of the kernel address through cache timing\cite{11}. 
 By repeating the above process 64 times, the attacker can successfully guess the 64-bit secret.

@@ -10,11 +10,142 @@
 % bezüglich der Ergebnisse zu erläutern und anschließend eventuell
 % festgestellte Abweichungen zu erklären.
 
-\ldots evaluation \ldots
+The evaluation of the fast call mechanism is split into two parts: 
+(i) we present the benchmarks for the existing kernel interface(system 
+call, ioctl, and vDSO), our fast call, and another fast call mechanism that 
+goes through the kernel.  (ii) we evaluate the impact of CPU side-channel attacks\cite{3,4} 
+and propose our mitigation.
 
-\todo{Write evaluation}
+\section{Performance evaluation}
 
-\cleardoublepage
+All benchmarks are based on  Intel Core i5-8400 processor 
+with six cores at 2.8 GHz 6 hyper-threads(1 per core). 
+The PC has 16 GB memory and runs Ubuntu 20.4 with the Linux 
+kernel version 5.12. We disable the turbo boost and fix the 
+CPU frequency at 2.8 GHz to get stable benchmarks. 
+In addition, we also disabled address space randomization. 
+Before running the benchmark, we use \emph{taskset} to set CPU 
+affinity so that our benchmark can run in a specific CPU.  
+
+We evaluate the performance of different IO methods, e.g., 
+\emph{system call}, \emph{vDSO},  \emph{ioctil}, and fast calls created by two 
+different fast call mechanisms. Note that fast calls created 
+by another fast call mechanism go through the kernel compared 
+to our mechanics.  The figure shows the five different IO 
+methods we are going to compare. Technically, we have implemented a 
+noop function for each method. In the benchmark, we use \emph{RDTSCP}\cite{14} to 
+measure each method's time and repeat the measurement 1000000 times. 
+In particular, we combine instruction \emph{CPUID} and \emph{RDTSCP} to serialize 
+the out-of-order executed code.  After the measurement, we also 
+calculate the mean, standard deviation, and median of each methods' 
+execution time. The results are shown in the following figures.
+
+
+\section{CPU side-channel attacks mitigation}
+
+CPU side-channel attacks\cite{3,4} severely impact our fast call 
+mechanism since fast call's components run on the user space, 
+i.e., without kernel protection. Specifically, a fast call keeps its secret 
+in the secret region, and the secret region relies on the permission bit on 
+the page table entry to avoid any malicious user from reading this region. 
+Remember that we discussed in the implementation chapter that the x86 architecture does not 
+support executable-only pages.  Here, even if the x86 architecture supports 
+only executable pages in the future, i.e., add a new permission bit for 
+executable-only on \emph{PTE}\cite{25},  we cannot prevent attackers from using meltdown to 
+attack this area. Now let us review the code snippet in the chapter \ref{sec:state} and see how an attacker uses this code to steal the secret(64-bit) in the 
+secret region. Here we assume that the x86 architecture already supports 
+executable-only pages.
+
+\begin{lstlisting}[style=CStyle]
+    char buf[8192]
+  
+    // the Flush of Flush+Reload
+    clflush buf[0]
+    clflush buf[4096]
+  
+    <some expensive instruction like divide>
+  
+    r1 = <a secret region virtual address>
+    r2 = *r1
+    r2 = r2 & 1      // speculated
+    r2 = r2 * 4096   // speculated
+    r3 = buf[r2]     // speculated
+  
+    <handle the page fault from "r2 = *r1">
+  
+    // the Reload of Flush+Reload
+    a = rdtsc
+    r0 = buf[0]
+    b = rdtsc
+    r1 = buf[4096]
+    c = rdtsc
+    if b-a < c-b:
+      low bit was probably a 1
+  \end{lstlisting}
+  In this code snippet\cite{1}, the attacker first flushes the cache so that no 
+  records related to \emph{buf[0]} and \emph{buf[4096]} exist in the cache. Then the 
+  attacker lets the \emph{multi-core CPU} execute a costly instruction.  
+  Instead of waiting for the completion of the instruction, the CPU 
+  executes the following instructions speculatively. Remember, we discussed 
+  in the chapter technical background that the CPU executes instructions 
+  from lines 10 to 13 before checking whether the instructions are valid. 
+  This means that the CPU checks the permission bit "executable only" on  
+  \emph{PTE} corresponding to the page mapped to the secret region after it 
+  obtains the secret stored on the secret region and complete the 
+  code in line 12 and 13.  In other words,  in line 10 of the above 
+  code snippet,  the CPU first tries to load the secret from the 
+  cache directly. If it is a load miss, the secret data is fetched 
+  from memory to register \emph{r2,} and the CPU puts it into the cache. 
+  Then the CPU executes the instructions in lines 11, 12, 13 and 
+  puts the value of \emph{buf[0]} or \emph{buf[4096]} to the cache based on 
+  the first bit of the secret.  Later, during the instruction 
+  retirement stage, the CPU checks whether the instruction in 
+  line 10 is valid based on the permission bit on \emph{PTE} and reverts 
+  its state since the execution from lines 10 to 13 are not permitted. 
+  However, everything is too late. The value of \emph{buf[0]} or \emph{buf[4096]} 
+  is already cached, and the CPU cannot revert the cache state. 
+  Therefore, the attacker can then guess the secret by cache timing\cite{11}. 
+  In the end, the attacker can get the secret by executing this code 
+  snippet 64 times, each time guessing 1 bit of the secret.
+
+  On top of that, the same things happened if we also set cache disable bit 
+  on the secret page's \emph{PTE}.  In this case, any data 
+  that is on the secret page will not be cached(the code in line 
+  13 will not be cached).  This means,  in line 10 of the above code snippet, 
+  after the secret is fetched from memory to register r2, the CPU won't 
+  put it into the cache.  However, the meltdown attack does not rely on the 
+  secret directly.  Instead, the attacker uses flush and reload to check 
+  whether \emph{buf[0]} or \emph{buf[4096]} is in the cache. Therefore, it does not 
+  matter whether the secret is in the cache.  In particular, there is no 
+  way to avoid the buffer from being uncached since the attacker allocates 
+  the buffer and does not set the \emph{cache-disable bit} on \emph{PTE}. Thus, we can't
+   protect the secret region using the permission bit \emph{executable-only}
+   and the cache-disable bit on \emph{PTE}.
+  
+
+
+  Because the meltdown attack is mainly composed of out-of-order 
+  execution and covert channel, mitigation methods can start from 
+  these two aspects. The second aspect would be more complicated 
+  since there are multiple potential convert channels, including 
+  cache, heat, etc.  So we decided to start from the first aspect. 
+  Here our goal is to prevent the secret from being accessed by 
+  unauthorized users. To achieve this goal, we argue that the CUP 
+  must be redesigned.  More specifically, the CPU should execute 
+  the memory-access related instruction(load data from memory or 
+  store data to memory) in the following order\cite{1}:
+
+
+  \begin{itemize}
+    \item Before the speculative load operation, the CPU should first check the permission bits on PTU. 
+    \item If the permission check is failed, zero should be returned instead of the real data.
+  \end{itemize}
+  In this way, the instructions in line 10 load zero into \emph{r2}. 
+  Therefore, the attacker cannot guess the secret anymore. Particularly, the secret is not cached too since the CPU cache the secret after 
+  it checks the permission bit. Note that AMD CPU 
+  obviously works in this way all along, which means Meltdown does work on AMD 
+  CPU.
+ \cleardoublepage
 
 %%% Local Variables:
 %%% TeX-master: "diplom"
