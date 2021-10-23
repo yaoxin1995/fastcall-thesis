@@ -134,8 +134,6 @@ executable-only pages.
   must be redesigned.  More specifically, the CPU should execute 
   the memory-access related instruction(load data from memory or 
   store data to memory) in the following order\cite{3}:
-
-
   \begin{itemize}
     \item Before the speculative memory fetch operation, the CPU should first check the permission bits on PTU. 
     \item If the permission check is failed, zero should be returned instead of the real data.
@@ -171,19 +169,19 @@ victim so that the
 victim has no choice but to kill itself. Therefore, we minimize the 
 possibility of the hidden area being attacked successfully.
 
-To further minimize the spectre attack, we need to put in more effort. 
+To further minimize the \emph{Spectre attack}, we need to put in more effort. 
 Here, our goal is to prevent the victim jumps to the gadget based on the wrong 
 records in the predictor.  One possible software solution is to design a tool 
 that can limit the wrong speculations. For example, Google's Retpoline patch can 
-detect and overwrite all dangerous branches that may affect Spectre Variant 2. 
+detect and overwrite all dangerous branches that may affect \emph{Spectre Variant 2}. 
 In this case, Google's Retpoline patch forces the CPU to jump to an empty gadget 
-after it executes the branch speculatively. A more solid solution is introducing 
-new instructions.  For example, the hardware engineer could add new instructions 
+after it executes the branch speculatively\cite{5}. A more solid solution is introducing 
+new instructions\cite{5}.  For example, the hardware engineer could add new instructions 
 that allow the operating system to empty the predictor in certain situations. 
 An ultimate solution would be redesigning the CPU architecture. The CPU architecture 
 should have dedicated hardware for speculative execution that is separated from other 
 CPU structures, especially the cache. Any speculatively executed operations should be 
-invisible before those operations are committed.  
+invisible before those operations are committed\cite{5}.  
  \cleardoublepage
 
 %%% Local Variables:
