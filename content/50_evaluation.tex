@@ -41,7 +41,7 @@ calculate the mean, standard deviation, and median of each methods'
 execution time. The results are shown in the following figures.
 
 
-\section{CPU side-channel attacks mitigation}
+\section{Meltdown attacks mitigation}
 
 CPU side-channel attacks\cite{3,4} severely impact our fast call 
 mechanism since fast call's components run on the user space, 
@@ -89,7 +89,7 @@ executable-only pages.
   executes the following instructions speculatively. Remember, we discussed 
   in the chapter technical background that the CPU executes instructions 
   from lines 10 to 13 before checking whether the instructions are valid. 
-  This means that the CPU checks the permission bit "executable only" on  
+  This means that the CPU checks the permission bit \emph{executable only} on  
   \emph{PTE} corresponding to the page mapped to the secret region after it 
   obtains the secret stored on the secret region and complete the 
   code in line 12 and 13.  In other words,  in line 10 of the above 
@@ -108,7 +108,7 @@ executable-only pages.
   In the end, the attacker can get the secret by executing this code 
   snippet 64 times, each time guessing 1 bit of the secret.
 
-  On top of that, the same things happened if we also set cache disable bit 
+  On top of that, the same things happened if we also set \emph{cache disable bit} 
   on the secret page's \emph{PTE}.  In this case, any data 
   that is on the secret page will not be cached(the code in line 
   13 will not be cached).  This means,  in line 10 of the above code snippet, 
@@ -133,18 +133,57 @@ executable-only pages.
   unauthorized users. To achieve this goal, we argue that the CUP 
   must be redesigned.  More specifically, the CPU should execute 
   the memory-access related instruction(load data from memory or 
-  store data to memory) in the following order\cite{1}:
+  store data to memory) in the following order\cite{3}:
 
 
   \begin{itemize}
-    \item Before the speculative load operation, the CPU should first check the permission bits on PTU. 
+    \item Before the speculative memory fetch operation, the CPU should first check the permission bits on PTU. 
     \item If the permission check is failed, zero should be returned instead of the real data.
   \end{itemize}
   In this way, the instructions in line 10 load zero into \emph{r2}. 
   Therefore, the attacker cannot guess the secret anymore. Particularly, the secret is not cached too since the CPU cache the secret after 
-  it checks the permission bit. Note that AMD CPU 
-  obviously works in this way all along, which means Meltdown does work on AMD 
-  CPU.
+  it checks the permission bit. Note that AMD CPUs obviously work in
+  this way all along, which means Meltdown does work on any of AMD CPUs\cite{26}.
+
+
+\section{Spectre attacks mitigation}
+
+After changing the CPU behavior in out-of-order execution, 
+attackers can no longer guess any data they do not have permission 
+to access, i.e., privilege escalation. However, attackers can still 
+exploit the \emph{Spectre vulnerability}\cite{4} to tamper devices through fast calls. 
+Specifically, an attacker process can poison the branch predictor 
+shared by all processes running on the same CPU so that the victim 
+process that has registered fast calls would jump to a gadget chosen 
+by the attacker. Since device registers are directly mapped onto the 
+user space(hidden regions), the gadget may trick the victim into 
+exploring the user space and finding the hidden regions. 
+In order to deal with this situation, we divide the user space into two 
+parts and assign the upper part of the user space to the hidden regions. 
+In the upper part of the user space, any page fault kills the process 
+directly, and processes are not allowed to allocate any memory, 
+which means a malicious attacker cannot handle the page fault in 
+some way and find the hidden region by exploring the user space anymore. 
+In this case, while executing the code in the gadget, the victim only 
+has one chance to guess the location of hidden regions. If the guess is 
+wrong, the page fault handler sends \emph{SEGKILL}\cite{21} to the 
+victim so that the 
+victim has no choice but to kill itself. Therefore, we minimize the 
+possibility of the hidden area being attacked successfully.
+
+To further minimize the spectre attack, we need to put in more effort. 
+Here, our goal is to prevent the victim jumps to the gadget based on the wrong 
+records in the predictor.  One possible software solution is to design a tool 
+that can limit the wrong speculations. For example, Google's Retpoline patch can 
+detect and overwrite all dangerous branches that may affect Spectre Variant 2. 
+In this case, Google's Retpoline patch forces the CPU to jump to an empty gadget 
+after it executes the branch speculatively. A more solid solution is introducing 
+new instructions.  For example, the hardware engineer could add new instructions 
+that allow the operating system to empty the predictor in certain situations. 
+An ultimate solution would be redesigning the CPU architecture. The CPU architecture 
+should have dedicated hardware for speculative execution that is separated from other 
+CPU structures, especially the cache. Any speculatively executed operations should be 
+invisible before those operations are committed.  
  \cleardoublepage
 
 %%% Local Variables:

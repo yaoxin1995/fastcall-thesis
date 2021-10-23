@@ -1,4 +1,4 @@
-\chapter{Conclusion And Outlook}
+\chapter{Conclusion and Future Work}
 \label{sec:conclusion}
 
 %  Schlußfolgerungen, Fragen, Ausblicke
@@ -16,9 +16,58 @@
 % weitsichtig man doch ist. Dieses Kapitel muß kurz sein, damit es
 % gelesen wird.
 
-\ldots conclusion \ldots
 
-\todo{write conclusion}
+This paper introduces the motivation, design, implementation, 
+and evaluation of the fast call mechanism for Linux kernel x86 
+architecture, providing the user-level application with a 
+high-performance IO path. The security issues that arise 
+during the work of the fast call are taken into account. 
+With fast calls, it is possible to have a high bandwidth 
+communication between the application and device without 
+exposing devices to unauthorized access.
+
+The fast system call mechanism increases the IO performance using 
+Kernel bypass, which means the user space application can communicate 
+with devices through the fast path on the user space. Compared to 
+traditional kernel bypass technologies, it also provides limited 
+protection for devices directly mapped to the user space. 
+Specifically, it leverages the permission bit on PTE and 
+the address randomization technology to isolate the 
+application and devices. On top of that,  fast calls 
+are adaptable. In the application's point of view, 
+invoking fast calls is the same as calling a user-level 
+function, i.e., using function pointers.  However,  
+fast calls are less secure than traditional approaches, i.e., 
+system calls, because fast calls are running on the user space, 
+losing the kernel protection.  This has also led to the fast 
+call mechanism being particularly fragile in the CPU side-channel 
+attacks. Therefore, we have proposed several ways to mitigate them 
+in the evaluation chapter. 
+We have compared the performance between the fast call and 
+existing kernel interfaces, i.g. \emph{system call}, \emph{vDSO}\cite{9}, \emph{ioctl}, etc. 
+The result shows that the fast call can improve the communication 
+speed by over 40x.
+
+
+Next, we plan to continue our work in the following three aspects:
+
+\begin{itemize}
+    \item We plan to generalize the fast call mechanism to more hardware architecture. 
+    \item The fast call mechanism currently only supports the fast call service function written by the assembly. In the future, we plan to add fast call functions using the c language.
+    \item We plan to migrate our implementation to Linux kernel version 5.14+ and employ the new Linux feature 
+    \emph{memfd}\cite{27} to protect the fast call secret region further. The reason is that \emph{memfd} can avoid an attacker from exploiting the kernel's direct map to get the secret on the secret page.
+\end{itemize}
+
+
+
+\section{Acknowledgments}
+Finally, I want to thank the supervisory team. Special 
+thanks to M.Sc. Maksym Planeta and Dipl.-Inf. Till Miemietz for their suggestion, 
+which helped me a lot in my thesis.
+
+
+
+
 
 \cleardoublepage
 
