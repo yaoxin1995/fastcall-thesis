@@ -75,17 +75,20 @@
 
 
 With the popularization of new generation hardware on the network and storage, the processing speed 
-of data packets on the hardware is getting faster and faster\cite{12}. For example, the bandwidth of the smart
-network card has reached an astonishing 100Gb/s. Under this circumstance, the traditional perception
- that the packet processing speed on hardware is lower than the packet processing speed in software is overturned\cite{Ousterhout1990WhyAO}, i.e.,
+of data packets on the hardware is getting faster and faster\cite{12}. For example, 
+the bandwidth of the smart
+network card has reached 100Gb/s. Under this circumstance, the traditional perception
+ that the packet processing speed on hardware is lower than the packet processing speed in 
+ software is overturned\cite{Ousterhout1990WhyAO}, i.e.,
 The software has become a performance bottleneck in data transmission.
 The reason is obvious. Compared with the continuous upgrading of hardware, 
-the communication between the application and the device still relies on the kernel IO stack. 
+the communication between the application and the device still relies 
+on the kernel IO stack. 
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.8\textwidth]{images/system_call}
-  \caption[Short description]{System Call Process}
+  \caption[System Call Process]{System Call Process}
   \label{fig:system_call_process}
 \end{figure}
  
@@ -114,8 +117,9 @@ to the user program in reverse order(step4-6).
 
 The system-call workflow leads to dramatic performance loss. 
 Compared to the function call, the caller and \emph{callee} are running on the user space, 
-the system call needs two context switches every time. The more serious problem comes from cache miss, such as 
-cache miss in TLB. TLB stands for \emph{Translation Lookaside Buffer} that contains the virtual address to 
+the system call needs two context switches every time. This has led to cache flush, which means
+cache misses, such as cache misses in TLB, happen after the context switch.
+TLB stands for \emph{Translation Lookaside Buffer} that contains the virtual address to 
 physical address mapping most likely to be accessed currently. Cache misses in the TLB can cause page faults, 
 leading to significant performance penalties since the operating system has to transfer the required pages 
 from the hard disk into the memory if the page fault is valid. Last but not least, OS needs to do various checks 
@@ -168,11 +172,11 @@ through a fast path provided by the fast call mechanisms. In addition, the fast 
  with devices looks like invoking a function call.
 
 However, the fast call mechanism is fragile since device registers and fast paths reside on user land. 
-An attacker may use \emph{Meltdown}\cite{1} or \emph{Spectre}\cite{3} vulnerability to damage the isolation between the device registers 
+An attacker may use \emph{Meltdown}\cite{3} or \emph{Spectre}\cite{4} vulnerability to damage the isolation between the device registers 
 and applications guaranteed by the fast paths. Because the vulnerabilities come from the hardware, it is 
 necessary to change the CPU design to mitigate the security issue caused by those attack models. In the 
 following chapters, we introduce the fast call mechanism step by step. At the end of this paper, we 
-evaluate the performance of the fast IO paths and propose our solution to mitigate the CPU side-channel attacks.
+evaluate the performance of the fast IO paths and propose our solution to mitigate the CPU side-channel attacks\cite{3,4}.
 \cleardoublepage
 
 %%% Local Variables:

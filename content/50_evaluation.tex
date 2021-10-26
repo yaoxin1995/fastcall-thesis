@@ -12,7 +12,7 @@
 
 The evaluation of the fast call mechanism is split into two parts: 
 (i) we present the benchmarks for the existing kernel interface(system 
-call, ioctl, and vDSO), our fast call, and another fast call mechanism that 
+call, ioctl, and vDSO)\cite{9, 28}, our fast call, and another fast call mechanism that 
 goes through the kernel.  (ii) we evaluate the impact of CPU side-channel attacks\cite{3,4} 
 and propose our mitigation.
 
@@ -21,27 +21,219 @@ and propose our mitigation.
 All benchmarks are based on  Intel Core i5-8400 processor 
 with six cores at 2.8 GHz 6 hyper-threads(1 per core). 
 The PC has 16 GB memory and runs Ubuntu 20.4 with the Linux 
-kernel version 5.12. We disable the turbo boost and fix the 
-CPU frequency at 2.8 GHz to get stable benchmarks. 
-In addition, we also disabled address space randomization. 
-Before running the benchmark, we use \emph{taskset} to set CPU 
-affinity so that our benchmark can run in a specific CPU.  
+kernel version 5.12. Particularly, we have configured the system 
+environment in the following way to get constant results when 
+benchmarking on Linux\cite{29}:
 
-We evaluate the performance of different IO methods, e.g., 
-\emph{system call}, \emph{vDSO},  \emph{ioctil}, and fast calls created by two 
-different fast call mechanisms. Note that fast calls created 
-by another fast call mechanism go through the kernel compared 
-to our mechanics.  The figure shows the five different IO 
-methods we are going to compare. Technically, we have implemented a 
-noop function for each method. In the benchmark, we use \emph{RDTSCP}\cite{14} to 
-measure each method's time and repeat the measurement 1000000 times. 
-In particular, we combine instruction \emph{CPUID} and \emph{RDTSCP} to serialize 
-the out-of-order executed code.  After the measurement, we also 
-calculate the mean, standard deviation, and median of each methods' 
-execution time. The results are shown in the following figures.
+\begin{itemize}
+  \item Disable turboboost.
+  \item Set scaling\_governor to performance.
+  \item Set CPU affinity.
+  \item Drop file system cache.
+  \item Disable address space randomization.
+\end{itemize}
 
 
-\section{Meltdown attacks mitigation}
+In each benchmark, we employ RDTSCP for timing. Each test is 
+iterated 1000000 times. In the end, we calculate the mean, median, 
+standard deviation of each test's execution time. Performance benchmarks include:
+\begin{itemize}
+  \item The speed test of different IO methods.
+  \item The speed test of the fast call registration/deregistration process.
+  \item The speed comparison of fork operations in different situations.
+\end{itemize}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.8\textwidth]{images/IO_PERFORMANCE}
+  \caption[IO performance benchmark]{IO performance benchmark}
+   \label{fig:IO_PERFORMANCE}
+\end{figure}
+
+\begin{table}[htp]
+  \centering
+  \begin{tabular}{lrrr}
+    \textbf{name} & \textbf{mean} & \textbf{median} & \textbf{std deviation} \\
+    \hline
+    \textit{system call empty} & 813 & 813 & 9\\
+    \textit{ioctl empty} &917 & 916 & 15\\
+    \textit{vdso empty} & 43 & 44 & 0\\
+    \textit{fastcall empty} & 42 & 42 & 2\\
+    \textit{fastcall read} & 44 & 44 & 3\\
+    \textit{fastcall variant2 empty} & 134 & 135 & 3\\
+    % \hline
+    % \textit{total} & 88,215 & \unit[100]{\%} & \unit[23]{\%}\\
+
+  \end{tabular}
+  \caption[IO performance benchmark, mitigation = auto]{IO performance benchmark, mitigation = auto, unit: cpu cycle}
+  \label{tab:numbers}
+\end{table}
+
+\begin{table}[htp]
+  \centering
+  \begin{tabular}{lrrr}
+    \textbf{name} & \textbf{mean} & \textbf{median} & \textbf{std deviation} \\
+    \hline
+    \textit{system call empty} & 210 & 210 & 1\\
+    \textit{ioctl empty} &305 & 305 & 4\\
+    \textit{vdso empty} & 43 & 44 & 0\\
+    \textit{fastcall empty} & 42 & 42 & 2\\
+    \textit{fastcall read} & 44 & 44 & 2\\
+    \textit{fastcall variant2 empty} & 134 & 135 & 0\\
+    % \hline
+    % \textit{total} & 88,215 & \unit[100]{\%} & \unit[23]{\%}\\
+
+  \end{tabular}
+  \caption[IO performance benchmark, mitigation = off]{IO performance benchmark, mitigation = off, unit: cpu cycle}
+  \label{tab:number1}
+\end{table}
+
+
+First, let us view the performance comparison of different IO methods, i.e., 
+system call empty function, ioctl empty function, vDSO empty function, fast call empty function, 
+fast call read function, and fast call variant2 empty functionq. 
+Note that the fast call read function is a fast call function that gets a secret 
+from the secret region and reads one byte from the hidden region using the secret 
+as the address. The fast call variant2 empty function represents an empty fast call 
+function created by another fast call mechanism. The difference between the fast 
+call empty function and the fast call variant2 empty function is that later one goes 
+through the kernel.  Figure \ref{fig:IO_PERFORMANCE} shows the mean and standard deviation of different 
+IO methods execution. Note that detailed data are listed in Tables ~\ref{tab:numbers} and ~\ref{tab:number1} 
+
+
+
+It is not difficult to see from the figure that when the mitigation is 
+turned on, the running speed of the fast call empty function is 20 times 
+that of the system call and ioctl. This is expected because, in this case, 
+context switching and page table switching are required when the system call 
+and ioctl cross the user-kernel boundary.  On the other hand, compared with ioctl, 
+the fast call read function can read the value of the device register mapped to the 
+hidden region with only 44 CPU cycles. This undoubtedly dramatically improves the 
+performance of IO. In particular, from comparing the fast call empty function 
+and fast call variant two empty function, we can find that the fast call empty 
+function is more than three times faster than the latter. Because the fast call 
+variant two must suffer the performance penalty caused by the context switch 
+in privilege transition. In addition, we found that the fast call function has 
+no performance loss due to the mitigation since it is running totally on the 
+user space. Correspondingly, when mitigation is turned on, the system call 
+and ioctl suffer a significant performance loss because the page table needs 
+to be switched additionally during the privilege transition. This has led 
+to cache missed etc.
+
+
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.8\textwidth]{images/rederegistration}
+  \caption[Fast call de/registration benchmark]{Fast call de/registration benchmark}
+   \label{fig:rederegistration}
+\end{figure}
+
+\begin{table}[htp]
+  \centering
+  \begin{tabular}{lrrr}
+    \textbf{name} & \textbf{mean} & \textbf{median} & \textbf{std deviation} \\
+    \hline
+    \textit{fast call registration with mitigation} & 208643 & 210051 & 8776\\
+    \textit{fast call registration without mitigation} & 205899 & 206473 & 8715\\
+
+
+    
+    % \hline
+    % \textit{total} & 88,215 & \unit[100]{\%} & \unit[23]{\%}\\
+
+  \end{tabular}
+  \caption[Fast call registration benchmark]{Fast call registration benchmark, unit: cpu cycle}
+  \label{tab:number2}
+\end{table}
+
+
+\begin{table}[htp]
+  \centering
+  \begin{tabular}{lrrr}
+    \textbf{name} & \textbf{mean} & \textbf{median} & \textbf{std deviation} \\
+    \hline
+    \textit{fast call deregistration with mitigation} &84671 & 85097 & 3305\\
+    \textit{fast call deregistration without mitigation} &80369 & 80542 & 4260\\
+    % \hline
+    % \textit{total} & 88,215 & \unit[100]{\%} & \unit[23]{\%}\\
+
+  \end{tabular}
+  \caption[Fast call deregistration benchmark]{Fast call deregistration benchmark, unit: cpu cycle}
+  \label{tab:number3}
+\end{table}
+
+
+Figure \ref{fig:rederegistration} shows the time required to register a fast call 
+and unregister a fast call. Because fast call registration 
+and cancellation consume a lot of time, the mitigation's impact 
+can be ignored. For detailed data, please refer to Tables ~\ref{tab:number2} and ~\ref{tab:number3}. 
+There are many reasons why the fast call registration process is much 
+slower than the fast call deregistration process. One of the essential 
+reasons is that the fast mechanism dynamically allocates and initializes the fast call table 
+when registering a fast call. In addition, during the fast call registration, 
+the kernel's fast call infrastructure needs to traverse the fast call table 
+multiple times, which also causes a considerable performance loss.
+
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.8\textwidth]{images/FORK}
+  \caption[FORK benchmark]{FORK benchmark}
+   \label{fig:FORK}
+\end{figure}
+
+
+\begin{table}[htp]
+  \centering
+  \begin{tabular}{lrrr}
+    \textbf{name} & \textbf{mean} & \textbf{median} & \textbf{std deviation} \\
+    \hline
+    \textit{fork simple(clean kernel)} & 105999 & 105546 & 2220\\
+    \textit{fork simple} &107727 & 107398 & 1695\\
+    \textit{fast call fork} & 118639 & 118144 & 2524\\
+    % \hline
+    % \textit{total} & 88,215 & \unit[100]{\%} & \unit[23]{\%}\\
+
+  \end{tabular}
+  \caption[FORK benchmark, mitigation = auto]{FORK benchmark, mitigation = auto, unit: cpu cycle}
+  \label{tab:numbers4}
+\end{table}
+
+
+\begin{table}[htp]
+  \centering
+  \begin{tabular}{lrrr}
+    \textbf{name} & \textbf{mean} & \textbf{median} & \textbf{std deviation} \\
+    \hline
+    \textit{fork simple(clean kernel)} & 100997 & 101011 & 2032\\
+    \textit{fork simple} &101472 & 101009 & 2375\\
+    \textit{fast call fork} & 112654 & 112216 & 2133\\
+    % \hline
+    % \textit{total} & 88,215 & \unit[100]{\%} & \unit[23]{\%}\\
+
+  \end{tabular}
+  \caption[FORK benchmark, mitigation = off]{FORK benchmark, mitigation = off, unit: cpu cycle}
+  \label{tab:numbers5}
+\end{table}
+
+As shown in the figure, we first tested the running speed of a 
+regular fork operation(fork simple) on the kernel  
+and without fast call implementation. Subsequently, we tested the 
+average execution speed of the fork(fast call fork) when the parent process registered 
+50 fast calls, and each fast call had 6 VMAs\emph{10.5555/983550}. It can be seen from the 
+figure that the regular fork operation runs at the same speed no matter 
+the kernel has the fast call implementation. 
+Interestingly, the average running time of \emph{fast call fork} is 10,000 cycles 
+longer than that of the \emph{simple fork}. This reason is that the parent process 
+in the \emph{fast call fork} has 50*6 VMAs more than the parent process in the \emph{simple fork}. 
+Although the VMAs belonging to the fast call cannot be copied during the 
+fork process, the kernel still needs to traverse these 300 VMAs and call 
+functions to modify the metadata about VMAs in the virtual address 
+space descriptor\emph{10.5555/983550} and other places.
+
+
+\section{Meltdown attack mitigation}
 
 CPU side-channel attacks\cite{3,4} severely impact our fast call 
 mechanism since fast call's components run on the user space, 
@@ -124,6 +316,8 @@ executable-only pages.
   
 
 
+   
+
   Because the meltdown attack is mainly composed of out-of-order 
   execution and covert channel, mitigation methods can start from 
   these two aspects. The second aspect would be more complicated 
@@ -135,7 +329,7 @@ executable-only pages.
   the memory-access related instruction(load data from memory or 
   store data to memory) in the following order\cite{3}:
   \begin{itemize}
-    \item Before the speculative memory fetch operation, the CPU should first check the permission bits on PTU. 
+    \item Before the speculative memory fetch operation, the CPU should first check the permission bits on PTE. 
     \item If the permission check is failed, zero should be returned instead of the real data.
   \end{itemize}
   In this way, the instructions in line 10 load zero into \emph{r2}. 
@@ -144,7 +338,7 @@ executable-only pages.
   this way all along, which means Meltdown does work on any of AMD CPUs\cite{26}.
 
 
-\section{Spectre attacks mitigation}
+\section{Spectre attack mitigation}
 
 After changing the CPU behavior in out-of-order execution, 
 attackers can no longer guess any data they do not have permission 

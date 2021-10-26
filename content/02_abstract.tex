@@ -13,31 +13,29 @@
 %\todo{write abstract}
 
 With the popularity of intelligent hardware like 
-Smart NIC and NVMe based SSD, the hardware's transmission 
-speed is getting faster and faster. This has led to current 
-I/O models supported by the kernel are not suitable for data 
-transmission anymore. When the application tries to communicate
+Smart NIC and NVMe based SSD\cite{10.1145/2757667.2757684}, the hardware's data transmission 
+speed is getting faster and faster. This has led to the current kernel
+I/O models are not suitable for data 
+transmission anymore. When the application communicates
  with the device through system calls, the overhead of the kernel IO path 
- becomes not negligible in the context of NVMe-based SSD and smart NIC. 
- Thus, various technologies were invented, i.g. DPDK, SPDK, and XDP.
+ becomes not negligible in the context of NVMe-based SSD and smart NIC\cite{12}. 
+ Thus, various technologies were invented, i.g. DPDK\cite{7} and XDP\cite{10.1145/3281411.3281443}.
 
-One of the novel technologies is bypassing the kernel 
-by directly mapping the device into user space. However, 
+ One of the novel technologies is bypassing the kernel, i.e., directly mapping the device into userspace. However, 
 this has led to potential security issues because "there is 
 no centralized and trusted entity to control the operations 
 issued by applications to hardware, and most devices
-themselves lack sufficient isolation mechanism." Therefore, 
-this thesis introduces a new system call mechanism to reduce 
-the overhead caused by the kernel by mapping the device to the
- user space and provide isolation between user-land application and device. 
+themselves lack sufficient isolation mechanism." Therefore, this thesis proposes a new 
+IO mechanism that reduces the kernel overhead by mapping the device into user space 
+and provides isolation between applications and devices. 
  The evaluation shows this approach could significantly increase the performance 
  compared to the traditional IO path crossing the user kernel boundary. However, 
  we must avoid losing safety protection for devices or mitigate secure vulnerability 
  caused by bypassing the kernel entirely. We will try to
 sketch Potential solutions to these problems, inspired by multiple 
-classic attack models such as meltdown. In summary, with this new idea, 
+classic attack models such as \emph{Meltdown}\cite{1}. In summary, with this new idea, 
 performance-critical applications may have the ability to interact with 
-PCIe devices in low latency, software-based, less secured way.
+PCIe devices in a low latency, software-based, less secured way.
 %%% Local Variables:
 %%% TeX-master: "diplom"
 %%% End:

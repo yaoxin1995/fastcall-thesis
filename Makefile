@@ -45,8 +45,10 @@ DOC_IMG_PNG  = images/sequence_file.pdf
 
 DOC_IMG_PNG  = images/fast_call_design_idea1.pdf
 DOC_IMG_PNG  = images/ring_protection.pdf
+DOC_IMG_PNG  = images/IO_PERFORMANCE.PNG
+DOC_IMG_PNG  = images/rederegistration.PNG
 
-
+DOC_IMG_PNG  = images/FORK.PNG
 
 # latex stuff
 LUALATEX    ?= lualatex --synctex=1
